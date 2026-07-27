@@ -10,11 +10,15 @@
 importScripts('site-hints.js');
 const hints = self.DougaSiteHints;
 
-const MANIFEST_RE = /\.(m3u8|mpd|ism(?:\/manifest)?)(\?|$)/i;
-const MEDIA_FILE_RE = /\.(mp4|webm|mkv|mov|m4v|flv|avi|ogv|m4a|mp3|aac|opus|wav)(\?|$)/i;
-const SEGMENT_RE = /\.(ts|m4s|cmfv|cmfa|aac|dash)(\?|$)/i;
+const MANIFEST_RE = /\.(m3u8|m3u|mpd|f4m|ism(?:\/manifest)?)(\?|$)/i;
+const MEDIA_FILE_RE =
+  /\.(mp4|webm|mkv|mov|m4v|flv|avi|ogv|ogg|mpg|mpeg|3gp|wmv|asf|f4v|divx|m2ts|mts|vob|rm|rmvb|m4a|mp3|aac|opus|wav|flac|wma)(\?|$)/i;
+const SEGMENT_RE = /\.(ts|m4s|cmfv|cmfa|dash|seg)(\?|$)/i;
 const MEDIA_MIME_RE =
-  /^(video\/|audio\/|application\/(vnd\.apple\.mpegurl|x-mpegurl|dash\+xml|f4m))/i;
+  /^(video\/|audio\/|application\/(vnd\.apple\.mpegurl|x-mpegurl|dash\+xml|f4m|vnd\.ms-sstr\+xml))/i;
+
+/** 小さすぎるファイルはスプライトやプレビューのことが多い */
+const MIN_FILE_SIZE = 50 * 1024;
 
 const MAX_PER_TAB = 60;
 
@@ -124,7 +128,7 @@ function record(tabId, url, kind, extra = {}) {
     seenAt: Date.now(),
     source: extra.source || 'network',
     // YouTube の実体 URL や広告配信は一覧の下に沈める
-    demoted: hints.isDemoted(url)
+    noise: hints.isNoise(url)
   });
   persist(tabId);
   updateBadge(tabId);
@@ -167,11 +171,22 @@ chrome.webRequest.onHeadersReceived.addListener(
       return;
     }
 
-    const kind = classify(url, mime);
+    // Chrome は <video>/<audio> が出したリクエストを type:'media' で分類する。
+    // 拡張子も Content-Type もあてにならないサイトでも、これは効く。
+    const isMediaRequest = details.type === 'media';
+
+    const kind = classify(url, mime) || (isMediaRequest ? 'file' : null);
     if (!kind) return;
-    if (!MEDIA_MIME_RE.test(mime) && !MANIFEST_RE.test(url) && !MEDIA_FILE_RE.test(url)) return;
-    // ごく小さいレスポンスは広告ビーコンや空ファイルのことが多い
-    if (kind === 'file' && size !== null && size < 64 * 1024) return;
+    if (
+      !isMediaRequest &&
+      !MEDIA_MIME_RE.test(mime) &&
+      !MANIFEST_RE.test(url) &&
+      !MEDIA_FILE_RE.test(url)
+    ) {
+      return;
+    }
+    // ごく小さいレスポンスはスプライトやプレビュー、広告ビーコンのことが多い
+    if (kind === 'file' && !isMediaRequest && size !== null && size < MIN_FILE_SIZE) return;
 
     record(details.tabId, url, kind, { size });
   },
@@ -249,7 +264,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 /** マニフェストを最優先、次に大きいファイル。降格された URL は最後に回す */
 function rank(candidate) {
-  if (candidate.demoted) return -1e15 + (candidate.size || 0);
+  if (candidate.noise) return -1e15 + (candidate.size || 0);
   const base = candidate.kind === 'hls' || candidate.kind === 'dash' ? 1e12 : 0;
   return base + (candidate.size || 0);
 }

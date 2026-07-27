@@ -1,11 +1,20 @@
 'use strict';
 
 /**
- * サイトごとの癖を吸収するヘルパー。
+ * URL の整形と、ノイズの切り分け。
+ *
+ * 基本方針は「サイトを列挙しない」こと。どのサイトでも同じ経路で動くのが前提で、
+ * ここに書くのは次の2種類だけ:
+ *
+ *   1. どのサイトにも効く汎用処理（トラッキング用クエリの除去など）
+ *   2. 汎用処理では原理的に解決できない例外
+ *      （タイムライン上で再生するサイトは、ページ URL が動画を指さない）
+ *
+ * 「このサイトは対応/ 非対応」という判定はここでは持たない。
+ * 対応可否はアプリ側が実際に試して決める（engine.probeChain）。
  *
  * content script / service worker / popup の3か所から使うため、
  * ES モジュールではなく globalThis に載せている。
- * （content script は import できず、service worker は importScripts で読む）
  */
 
 (function (root) {
@@ -17,60 +26,48 @@
     }
   };
 
-  const matches = (host, domains) =>
-    domains.some((domain) => host === domain || host.endsWith('.' + domain));
-
-  /** yt-dlp の専用エクストラクタが強く、ページ URL を渡すのが確実なサイト */
-  const PAGE_FIRST = [
-    'youtube.com',
-    'youtu.be',
-    'x.com',
-    'twitter.com',
-    'pornhub.com',
-    'xvideos.com',
-    'xhamster.com',
-    'nicovideo.jp',
-    'vimeo.com',
-    'twitch.tv',
-    'bilibili.com',
-    'dailymotion.com',
-    'tiktok.com',
-    'instagram.com',
-    'reddit.com'
+  /** どのサイトでも動画本体とは無関係な、計測・共有用のクエリ */
+  const TRACKING_PARAMS = [
+    'utm_source',
+    'utm_medium',
+    'utm_campaign',
+    'utm_term',
+    'utm_content',
+    'fbclid',
+    'gclid',
+    'igshid',
+    'si',
+    'ref_src',
+    'ref_url',
+    's',
+    'pp'
   ];
 
   /**
-   * 一覧に出しても役に立たない、あるいは短命な URL。
-   * 完全に隠さず優先度を下げるだけにして、いざという時は使えるようにしておく。
+   * 動画そのものではないが、ページ内で大量に流れて一覧を埋めてしまう配信元。
+   * 「非対応」ではなく「並び順を下げる」だけなので、必要なら選べる。
    */
-  const DEMOTED = [
-    // YouTube の実体 URL。形式ごとに分かれていて有効期限も短く、
-    // ページ URL を yt-dlp に渡したほうが確実
+  const NOISE_HOSTS = [
+    // 形式ごとに URL が分かれ、有効期限も短い。ページ URL を渡したほうが確実
     /(^|\.)googlevideo\.com$/i,
-    // 広告・トラッキング系
+    // 広告・計測
     /(^|\.)doubleclick\.net$/i,
     /(^|\.)googlesyndication\.com$/i,
+    /(^|\.)google-analytics\.com$/i,
     /(^|\.)adsrvr\.org$/i,
+    /(^|\.)adnxs\.com$/i,
+    /(^|\.)scorecardresearch\.com$/i,
     /(^|\.)exoclick\.com$/i,
     /(^|\.)trafficjunky\.net$/i,
-    /(^|\.)juicyads\.com$/i
+    /(^|\.)juicyads\.com$/i,
+    /(^|\.)popads\.net$/i
   ];
 
-  const NOTES = {
-    'youtube.com':
-      'YouTube は「このページをアプリで開く」が確実です。年齢制限つきの動画は Cookie の送信を有効にしてください。',
-    'youtu.be': 'YouTube は「このページをアプリで開く」が確実です。',
-    'x.com':
-      'X は再生中の投稿の個別 URL を自動で拾います。鍵アカウントやセンシティブな投稿は Cookie の送信が必要です。',
-    'twitter.com': 'X は再生中の投稿の個別 URL を自動で拾います。',
-    'pornhub.com': '年齢確認や会員限定の動画は Cookie の送信を有効にしてください。',
-    'xvideos.com': '年齢確認や会員限定の動画は Cookie の送信を有効にしてください。',
-    'hanime.tv':
-      'hanime.tv は専用の解析には対応していないため、下の HLS プレイリスト（.m3u8）を選んでください。'
-  };
-
   /**
-   * ページ URL を yt-dlp に渡しやすい形に整える。
+   * ページ URL を、動画1本を指す形に整える。
+   *
+   * 大半は汎用のクエリ除去で足りる。以下2件だけは、そのままだと
+   * 「別の動画」や「動画以外」を指してしまうため個別に扱う。
    */
   function normalizePageUrl(rawUrl) {
     let url;
@@ -81,45 +78,38 @@
     }
     const host = url.hostname.replace(/^www\./, '');
 
-    if (matches(host, ['youtube.com'])) {
-      // 再生リスト内の動画でも「今見ている1本」を対象にする
-      if (url.pathname === '/watch') {
-        const id = url.searchParams.get('v');
-        if (id) return `https://www.youtube.com/watch?v=${id}`;
-      }
-      if (url.pathname.startsWith('/shorts/')) {
-        return `https://www.youtube.com${url.pathname}`;
-      }
+    // 再生リスト付きの URL は、リスト全体ではなく開いている1本を対象にする
+    if (host === 'youtube.com' && url.pathname === '/watch') {
+      const id = url.searchParams.get('v');
+      if (id) return `https://www.youtube.com/watch?v=${id}`;
     }
 
-    if (matches(host, ['x.com', 'twitter.com'])) {
-      // /status/<id>/photo/1 や /video/1 といった末尾を落とす
+    // 投稿 URL の末尾に /video/1 や /photo/1 が付くと解析できない
+    if (host === 'x.com' || host === 'twitter.com') {
       const status = url.pathname.match(/^\/([^/]+)\/status\/(\d+)/);
       if (status) return `https://x.com/${status[1]}/status/${status[2]}`;
     }
 
-    // トラッキング用のクエリは落とす
-    for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'si', 'feature', 'pp']) {
-      url.searchParams.delete(key);
-    }
+    for (const key of TRACKING_PARAMS) url.searchParams.delete(key);
     return url.toString();
   }
 
   /**
-   * ページ URL だけでは対象が特定できないサイト向けに、
+   * ページ URL だけでは対象を特定できない場合に、
    * 再生中のメディア要素から本当の対象 URL を探す。
    *
-   * X はタイムライン上で再生できるため、ページ URL がタイムラインのままになる。
-   * 再生中の video から投稿の permalink をたどる。
+   * タイムライン上で動画を再生できるサイトでは、ページ URL は一覧
+   * （例: /home）のままで、どの投稿を見ているかの情報を持たない。
+   * 再生中の要素から投稿の permalink をたどる必要がある。
    */
   function targetForMedia(pageUrl, mediaElement) {
+    if (!mediaElement) return null;
     const host = hostOf(pageUrl);
-    if (!matches(host, ['x.com', 'twitter.com']) || !mediaElement) return null;
+    if (host !== 'x.com' && host !== 'twitter.com') return null;
 
     const article = mediaElement.closest('article');
     if (!article) return null;
 
-    // 投稿本文の時刻リンクが個別 URL になっている
     for (const anchor of article.querySelectorAll('a[href*="/status/"]')) {
       const match = anchor.getAttribute('href').match(/^\/([^/]+)\/status\/(\d+)/);
       if (match) return `https://x.com/${match[1]}/status/${match[2]}`;
@@ -127,34 +117,18 @@
     return null;
   }
 
-  /** ページ URL を優先すべきサイトか */
-  function prefersPageUrl(pageUrl) {
-    return matches(hostOf(pageUrl), PAGE_FIRST);
-  }
-
-  /** 候補の並び順を下げるべき URL か */
-  function isDemoted(url) {
+  /** 候補一覧で並び順を下げる URL か（除外はしない） */
+  function isNoise(url) {
     const host = hostOf(url);
     if (!host) return false;
-    return DEMOTED.some((pattern) => pattern.test(host));
-  }
-
-  /** ポップアップに出すサイト固有の注意書き */
-  function noteFor(pageUrl) {
-    const host = hostOf(pageUrl);
-    for (const [domain, note] of Object.entries(NOTES)) {
-      if (host === domain || host.endsWith('.' + domain)) return note;
-    }
-    return null;
+    return NOISE_HOSTS.some((pattern) => pattern.test(host));
   }
 
   root.DougaSiteHints = {
     hostOf,
     normalizePageUrl,
     targetForMedia,
-    prefersPageUrl,
-    isDemoted,
-    noteFor,
-    PAGE_FIRST
+    isNoise,
+    TRACKING_PARAMS
   };
 })(typeof self !== 'undefined' ? self : globalThis);

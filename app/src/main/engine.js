@@ -190,7 +190,7 @@ function friendlyError(lines) {
     return 'サーバーにアクセスを拒否されました（403/404）。Referer や Cookie が必要な可能性があります。';
   }
   if (/Unsupported URL/i.test(text)) {
-    return 'この URL には対応していません。ページ URL ではなく動画ファイル/マニフェストの URL を試してください。';
+    return 'このページは直接解析できませんでした。ブラウザ拡張機能から送ると、ページ内のストリームを自動で試します。';
   }
   if (/Unable to download webpage|getaddrinfo|Connection|timed out/i.test(text)) {
     return 'ネットワークに接続できませんでした。';
@@ -297,6 +297,83 @@ async function probe(url, { headers, cookieFile, signal } = {}) {
 }
 
 /**
+ * 解析対象の並び順を決める。
+ *
+ * サイトごとの対応表は持たない。yt-dlp は多数のサイトに対応しているので
+ * まずページ URL を試し、それが通らないサイトでは拡張機能が検出した
+ * ストリームへ落ちる、という順番だけで大半のサイトが賄える。
+ *
+ * ストリーム同士では、単一ファイルより画質を選べるマニフェストを先に試す。
+ */
+function orderTargets(target, candidates = []) {
+  const urls = [];
+  const seen = new Set();
+  const push = (url) => {
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    urls.push(url);
+  };
+
+  push(target);
+
+  const usable = candidates.filter((c) => c && c.url && !c.noise);
+  const rank = { hls: 0, dash: 0, file: 1, audio: 2 };
+  const ordered = [...usable].sort(
+    (a, b) => (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3) || (b.size || 0) - (a.size || 0)
+  );
+  for (const candidate of ordered) push(candidate.url);
+
+  // ノイズ扱いの URL も、他に何も無ければ最後の手段として試す
+  for (const candidate of candidates) {
+    if (candidate && candidate.noise) push(candidate.url);
+  }
+  return urls;
+}
+
+/**
+ * 候補を順に解析し、最初に成功したものを返す。
+ *
+ * 「解析は通ったが形式が0件」も失敗として次へ進む。DRM で保護された
+ * ページなどはここに当たる。
+ */
+async function probeChain(target, candidates, options = {}) {
+  const urls = orderTargets(target, candidates);
+  if (urls.length === 0) throw new EngineError('URL が指定されていません。');
+
+  const attempts = [];
+  for (const url of urls) {
+    try {
+      const info = await probe(url, options);
+      if (info.kind === 'playlist' || (info.formats && info.formats.length > 0)) {
+        return { info, usedUrl: url, attempts };
+      }
+      attempts.push({ url, error: '再生できる形式が見つかりませんでした。' });
+    } catch (err) {
+      if (err && err.canceled) throw err;
+      attempts.push({ url, error: err ? err.message : String(err) });
+    }
+  }
+
+  const error = new EngineError(summarizeAttempts(attempts));
+  error.attempts = attempts;
+  throw error;
+}
+
+/** 全部失敗したときに、一番役に立つ一文を選ぶ */
+function summarizeAttempts(attempts) {
+  const messages = attempts.map((a) => a.error);
+  // ログインや DRM のように、対処が具体的なものを優先して見せる
+  const actionable = messages.find((m) => /ログイン|DRM|拒否/.test(m));
+  if (actionable) return actionable;
+  if (attempts.length > 1) {
+    return `${attempts.length} 件の URL を試しましたが取得できませんでした。最後のエラー: ${
+      messages[messages.length - 1]
+    }`;
+  }
+  return messages[0] || '取得できませんでした。';
+}
+
+/**
  * 選択内容から yt-dlp の -f セレクタを組み立てる。
  */
 function buildSelector({ formatId, mode, formats }) {
@@ -378,4 +455,13 @@ async function download(job, { onProgress, onLog, signal } = {}) {
   return { filePath: merged || destination };
 }
 
-module.exports = { probe, download, EngineError, buildSelector, normalizeFormats, tokenizeArgs };
+module.exports = {
+  probe,
+  probeChain,
+  orderTargets,
+  download,
+  EngineError,
+  buildSelector,
+  normalizeFormats,
+  tokenizeArgs
+};

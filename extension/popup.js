@@ -77,9 +77,6 @@ function shortUrl(url) {
 }
 
 function renderTarget() {
-  const note = hints && currentTab ? hints.noteFor(currentTab.url) : null;
-  if (note) $('site-note').textContent = note;
-
   const target = pageTargetUrl();
   const el = $('page-target');
   // ページ URL と違う URL を渡す場合だけ、何を送るのか明示する
@@ -89,6 +86,12 @@ function renderTarget() {
   } else {
     el.hidden = true;
   }
+
+  // サイト名で分岐せず、いま検出できているものから説明を組み立てる
+  const streams = detection.candidates.filter((c) => !c.noise).length;
+  $('site-note').textContent = streams
+    ? `まずページ全体をアプリが解析します。解析できないサイトでは、検出済みの ${streams} 件のストリームへ自動で切り替えます。`
+    : 'まずページ全体をアプリが解析します。解析できないサイトでは、動画を再生してからもう一度開くと、ストリームを直接取得できます。';
 }
 
 function renderList() {
@@ -97,7 +100,7 @@ function renderList() {
 
   for (const candidate of detection.candidates) {
     const li = document.createElement('li');
-    if (candidate.demoted) li.classList.add('is-demoted');
+    if (candidate.noise) li.classList.add('is-demoted');
 
     const main = document.createElement('div');
     main.className = 'item-main';
@@ -152,10 +155,13 @@ async function sendToApp(target, button) {
       origin: detection.headers.origin || null
     },
     cookies,
+    // アプリ側がページ URL で失敗したときの切り替え先として使う
     candidates: detection.candidates.map((c) => ({
       url: c.url,
       kind: c.kind,
-      label: c.label
+      label: c.label,
+      size: c.size || null,
+      noise: !!c.noise
     }))
   });
 
