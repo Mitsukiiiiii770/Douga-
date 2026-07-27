@@ -9,6 +9,7 @@ const engine = require('./engine');
 const queue = require('./queue');
 const bridge = require('./bridge');
 const cookies = require('./cookies');
+const postprocess = require('./postprocess');
 
 let mainWindow = null;
 /** 解析中のリクエストを id で中断できるようにする */
@@ -121,14 +122,26 @@ ipcMain.handle('settings:chooseDir', async () => {
   return result.filePaths[0];
 });
 
+const BINARY_SETTING_KEYS = {
+  ffmpeg: 'ffmpegPath',
+  ytdlp: 'ytdlpPath',
+  realesrgan: 'realesrganPath'
+};
+
 ipcMain.handle('settings:chooseBinary', async (_event, which) => {
+  const titles = {
+    ffmpeg: 'ffmpeg の実行ファイルを選択',
+    ytdlp: 'yt-dlp の実行ファイルを選択',
+    realesrgan: 'Real-ESRGAN の実行ファイルを選択'
+  };
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
-    title: which === 'ffmpeg' ? 'ffmpeg の実行ファイルを選択' : 'yt-dlp の実行ファイルを選択'
+    title: titles[which] || '実行ファイルを選択'
   });
   if (result.canceled || !result.filePaths.length) return null;
   const chosen = result.filePaths[0];
-  settings.set(which === 'ffmpeg' ? { ffmpegPath: chosen } : { ytdlpPath: chosen });
+  const key = BINARY_SETTING_KEYS[which];
+  if (key) settings.set({ [key]: chosen });
   return chosen;
 });
 
@@ -147,6 +160,8 @@ ipcMain.handle('bridge:regenerateToken', async () => {
 });
 
 ipcMain.handle('binaries:status', () => binaries.status());
+
+ipcMain.handle('postprocess:presets', () => postprocess.presetList());
 
 ipcMain.handle('binaries:install', async (_event, which) => {
   const onProgress = (p) => send('binaries:progress', p);

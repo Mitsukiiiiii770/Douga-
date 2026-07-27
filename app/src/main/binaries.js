@@ -74,6 +74,14 @@ function ffmpeg() {
   return resolveBinary('ffmpeg', settings.get().ffmpegPath);
 }
 
+/** 任意インストール。無くても ffmpeg ベースの後処理は使える */
+function realesrgan() {
+  return (
+    resolveBinary('realesrgan-ncnn-vulkan', settings.get().realesrganPath) ||
+    resolveBinary('realesrgan', settings.get().realesrganPath)
+  );
+}
+
 function version(bin, args = ['--version']) {
   return new Promise((resolve) => {
     if (!bin) return resolve(null);
@@ -87,13 +95,13 @@ function version(bin, args = ['--version']) {
 async function status() {
   const y = ytdlp();
   const f = ffmpeg();
-  const [yv, fv] = await Promise.all([
-    version(y),
-    version(f, ['-version'])
-  ]);
+  const r = realesrgan();
+  const [yv, fv] = await Promise.all([version(y), version(f, ['-version'])]);
   return {
     ytdlp: { path: y, version: yv, ok: !!yv },
     ffmpeg: { path: f, version: fv ? fv.replace(/^ffmpeg version /, '') : null, ok: !!fv },
+    // 任意。無くても ffmpeg ベースの後処理は使えるので、バージョン確認まではしない
+    realesrgan: { path: r, version: null, ok: !!r, optional: true },
     platform: process.platform
   };
 }
@@ -227,6 +235,7 @@ async function installFfmpeg(onProgress) {
 module.exports = {
   ytdlp,
   ffmpeg,
+  realesrgan,
   status,
   installYtdlp,
   installFfmpeg,
