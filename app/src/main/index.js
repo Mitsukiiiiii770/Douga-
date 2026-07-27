@@ -165,8 +165,14 @@ ipcMain.handle('postprocess:presets', () => postprocess.presetList());
 
 ipcMain.handle('binaries:install', async (_event, which) => {
   const onProgress = (p) => send('binaries:progress', p);
-  if (which === 'ffmpeg') await binaries.installFfmpeg(onProgress);
-  else await binaries.installYtdlp(onProgress);
+  // 未知の値で黙って yt-dlp を入れてしまわないよう、明示的に振り分ける
+  const installers = {
+    ffmpeg: binaries.installFfmpeg,
+    ytdlp: binaries.installYtdlp
+  };
+  const install = installers[which];
+  if (!install) throw new Error(`自動インストールに対応していません: ${which}`);
+  await install(onProgress);
   return binaries.status();
 });
 
