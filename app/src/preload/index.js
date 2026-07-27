@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('douga', {
     retry: (id) => ipcRenderer.invoke('job:retry', id),
     remove: (id) => ipcRenderer.invoke('job:remove', id),
     clearFinished: () => ipcRenderer.invoke('job:clearFinished'),
+    resumeInterrupted: () => ipcRenderer.invoke('job:resumeInterrupted'),
     onUpdate: listen('job:update'),
     onRemoved: listen('job:removed')
   },

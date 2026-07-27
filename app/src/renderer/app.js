@@ -9,11 +9,15 @@ const state = {
   cookieFile: null,
   headers: {},
   capture: null,
+  playlist: null,
   probeId: null,
   jobs: new Map()
 };
 
 const $ = (id) => document.getElementById(id);
+
+/** 実行中とみなす状態。中止できて、削除はできない */
+const ACTIVE_STATUSES = ['queued', 'downloading', 'processing', 'enhancing'];
 
 const uuid = () =>
   typeof crypto !== 'undefined' && crypto.randomUUID
@@ -193,9 +197,24 @@ function renderVideo(info) {
   syncModeFields();
 }
 
+/** プレイリストの1件をキューに積む。まとめて追加でも使う */
+function addPlaylistEntry(entry) {
+  api.jobs.add({
+    url: entry.url,
+    title: entry.title,
+    duration: entry.duration,
+    mode: 'best',
+    qualityLabel: '最高画質',
+    headers: state.headers,
+    cookieFile: state.cookieFile
+  });
+}
+
 function renderPlaylist(info) {
+  state.playlist = info;
   $('playlist-title').textContent = info.title;
   $('playlist-sub').textContent = `${info.entries.length} 件の動画`;
+  $('playlist-add-all').textContent = `すべて（${info.entries.length} 件）をキューに追加`;
   const list = $('playlist-list');
   list.innerHTML = '';
   for (const entry of info.entries) {
@@ -213,13 +232,7 @@ function renderPlaylist(info) {
     add.className = 'small primary';
     add.textContent = '追加';
     add.addEventListener('click', () => {
-      api.jobs.add({
-        url: entry.url,
-        title: entry.title,
-        mode: 'best',
-        headers: state.headers,
-        cookieFile: state.cookieFile
-      });
+      addPlaylistEntry(entry);
       showTab('queue');
     });
     li.append(label, time, open, add);
@@ -227,6 +240,14 @@ function renderPlaylist(info) {
   }
   $('playlist').hidden = false;
 }
+
+$('playlist-add-all').addEventListener('click', () => {
+  if (!state.playlist) return;
+  for (const entry of state.playlist.entries) addPlaylistEntry(entry);
+  // 全件で同じ Cookie を使い回したので、ここで解析側の参照を手放す
+  state.cookieFile = null;
+  showTab('queue');
+});
 
 $('mode-select').addEventListener('change', syncModeFields);
 
@@ -331,7 +352,8 @@ function renderJob(job) {
     enhancing: '高画質化中',
     completed: '完了',
     error: 'エラー',
-    canceled: 'キャンセル'
+    canceled: 'キャンセル',
+    interrupted: '中断（アプリ終了）'
   }[job.status] || job.status;
 
   const details = [statusText];
@@ -375,17 +397,21 @@ function renderJob(job) {
     actions.appendChild(button);
   };
 
-  if (['queued', 'downloading', 'processing'].includes(job.status)) {
+  if (ACTIVE_STATUSES.includes(job.status)) {
     addButton('中止', () => api.jobs.cancel(job.id));
   }
-  if (['error', 'canceled'].includes(job.status)) {
+  if (['error', 'canceled', 'interrupted'].includes(job.status)) {
     addButton('再試行', () => api.jobs.retry(job.id));
   }
   if (job.status === 'completed' && job.filePath) {
     addButton('再生', () => api.shell.openPath(job.filePath), 'small primary');
     addButton('フォルダを開く', () => api.shell.showItem(job.filePath));
+    // 後処理で別ファイルを作った場合、元ファイルにも辿れるようにする
+    if (job.sourcePath) {
+      addButton('元ファイル', () => api.shell.openPath(job.sourcePath));
+    }
   }
-  if (!['downloading', 'processing'].includes(job.status)) {
+  if (!ACTIVE_STATUSES.includes(job.status)) {
     addButton('削除', () => api.jobs.remove(job.id));
   }
 
@@ -400,6 +426,15 @@ function renderJob(job) {
   progress.appendChild(fill);
   li.appendChild(progress);
 
+  // 後処理の失敗はダウンロード自体の失敗ではないので、
+  // エラーにはせず警告として出す（元ファイルは残っている）
+  if (job.postProcessError) {
+    const warn = document.createElement('div');
+    warn.className = 'job-warn';
+    warn.textContent = `高画質化に失敗しました（動画は保存済みです）: ${job.postProcessError}`;
+    li.appendChild(warn);
+  }
+
   if (job.error) {
     const error = document.createElement('div');
     error.className = 'job-error';
@@ -410,12 +445,18 @@ function renderJob(job) {
 
 function refreshQueueBadge() {
   const active = [...state.jobs.values()].filter((j) =>
-    ['queued', 'downloading', 'processing'].includes(j.status)
+    ACTIVE_STATUSES.includes(j.status)
   ).length;
   const badge = $('queue-badge');
   badge.textContent = String(active);
   badge.hidden = active === 0;
   $('queue-empty').hidden = state.jobs.size > 0;
+
+  // 前回終了時に走っていたジョブがあるときだけ再開ボタンを出す
+  const interrupted = [...state.jobs.values()].filter((j) => j.status === 'interrupted').length;
+  const resume = $('resume-interrupted');
+  resume.hidden = interrupted === 0;
+  resume.textContent = `中断した ${interrupted} 件を再開`;
 }
 
 api.jobs.onUpdate((job) => {
@@ -433,6 +474,10 @@ api.jobs.onRemoved((id) => {
 
 $('clear-finished').addEventListener('click', async () => {
   await api.jobs.clearFinished();
+});
+
+$('resume-interrupted').addEventListener('click', async () => {
+  await api.jobs.resumeInterrupted();
 });
 
 /* ---------------- 設定 ---------------- */

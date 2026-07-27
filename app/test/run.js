@@ -15,7 +15,8 @@ const suites = [
   'site-hints.test.js',
   'fallback.test.js',
   'bridge.test.js',
-  'queue.test.js'
+  'queue.test.js',
+  'persistence.test.js'
 ];
 
 let failed = 0;

@@ -105,6 +105,9 @@
         <div class="result" id="playlist" hidden>
           <h2 id="playlist-title"></h2>
           <p class="muted" id="playlist-sub"></p>
+          <div class="row">
+            <button id="playlist-add-all" class="primary">すべてキューに追加</button>
+          </div>
           <ul class="playlist-list" id="playlist-list"></ul>
         </div>
 
@@ -119,7 +122,10 @@
       <section class="panel" data-panel="queue">
         <div class="queue-head">
           <h2>ダウンロードキュー</h2>
-          <button id="clear-finished" class="ghost">完了したものを消す</button>
+          <div class="row">
+            <button id="resume-interrupted" class="primary" hidden>中断したものを再開</button>
+            <button id="clear-finished" class="ghost">完了したものを消す</button>
+          </div>
         </div>
         <ul class="job-list" id="job-list"></ul>
         <p class="empty" id="queue-empty">キューは空です。</p>
