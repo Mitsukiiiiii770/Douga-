@@ -47,9 +47,12 @@ function formatLabel(f) {
   const parts = [];
   if (f.height) parts.push(`${f.height}p${f.fps && f.fps > 30 ? Math.round(f.fps) : ''}`);
   else if (f.kind === 'audio') parts.push('音声');
+  // HDR は解像度と同じくらい見た目に効くので目立たせる
+  if (f.dynamicRange && f.dynamicRange !== 'SDR') parts.push(f.dynamicRange);
   if (f.ext) parts.push(f.ext);
   if (f.vcodec) parts.push(f.vcodec.split('.')[0]);
   if (f.kind === 'video') parts.push('映像のみ（音声を自動結合）');
+  if (f.audioChannels && f.audioChannels > 2) parts.push(`${f.audioChannels}ch`);
   if (f.abr) parts.push(`${Math.round(f.abr)}kbps`);
   if (f.filesize) parts.push(formatBytes(f.filesize));
   if (f.note && !parts.includes(f.note)) parts.push(f.note);
@@ -436,6 +439,8 @@ async function loadSettings() {
   $('max-concurrent').value = s.maxConcurrent;
   $('concurrent-fragments').value = s.concurrentFragments;
   $('container-select').value = s.container;
+  $('quality-preset').value = s.qualityPreset;
+  $('max-height').value = String(s.maxHeight || 0);
   $('extra-args').value = s.extraArgs || '';
   $('bridge-port').value = s.bridgePort;
   $('bridge-enabled').checked = s.bridgeEnabled;
@@ -483,6 +488,8 @@ for (const [id, key, cast] of [
   ['max-concurrent', 'maxConcurrent', Number],
   ['concurrent-fragments', 'concurrentFragments', Number],
   ['container-select', 'container', String],
+  ['quality-preset', 'qualityPreset', String],
+  ['max-height', 'maxHeight', Number],
   ['extra-args', 'extraArgs', String],
   ['bridge-port', 'bridgePort', Number]
 ]) {

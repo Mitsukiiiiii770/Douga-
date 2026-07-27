@@ -91,8 +91,12 @@ function tokenizeArgs(raw) {
   return tokens;
 }
 
-function baseArgs({ headers, cookieFile } = {}) {
-  const cfg = settings.get();
+/**
+ * cfg を明示的に渡せるようにしてある。渡さなければ現在の設定を読む。
+ * 引数の組み立てを設定ファイルから切り離しておくと、単体で検証できる。
+ */
+function baseArgs({ headers, cookieFile, cfg: given } = {}) {
+  const cfg = given || settings.get();
   const args = [
     '--ignore-config',
     '--no-colors',
@@ -222,14 +226,25 @@ function normalizeFormats(info) {
       abr: f.abr || null,
       vcodec: hasVideo ? f.vcodec : null,
       acodec: hasAudio ? f.acodec : null,
+      // HDR / Dolby Vision は解像度と同じくらい見た目に効くので拾っておく
+      dynamicRange: f.dynamic_range || null,
+      asr: f.asr || null,
+      audioChannels: f.audio_channels || null,
       filesize: f.filesize || f.filesize_approx || null,
       note: f.format_note || '',
       kind: hasVideo && hasAudio ? 'both' : hasVideo ? 'video' : 'audio',
       language: f.language || null
     });
   }
-  // 画質の高い順 → ビットレートの高い順
-  out.sort((a, b) => (b.height || 0) - (a.height || 0) || (b.tbr || 0) - (a.tbr || 0));
+  // 解像度 → フレームレート → HDR → ビットレートの順で良いものを上に
+  const hdrRank = (f) => (f.dynamicRange && f.dynamicRange !== 'SDR' ? 1 : 0);
+  out.sort(
+    (a, b) =>
+      (b.height || 0) - (a.height || 0) ||
+      (b.fps || 0) - (a.fps || 0) ||
+      hdrRank(b) - hdrRank(a) ||
+      (b.tbr || 0) - (a.tbr || 0)
+  );
   return out;
 }
 
@@ -375,6 +390,10 @@ function summarizeAttempts(attempts) {
 
 /**
  * 選択内容から yt-dlp の -f セレクタを組み立てる。
+ *
+ * bv*+ba は「映像単体トラック＋音声単体トラック」を選んで結合する指定。
+ * 多くのサイトで最高画質は映像単体でしか配信されないため、
+ * 映像+音声が入った単一ファイル（b）より優先する必要がある。
  */
 function buildSelector({ formatId, mode, formats }) {
   if (mode === 'audio') return 'bestaudio/best';
@@ -385,15 +404,41 @@ function buildSelector({ formatId, mode, formats }) {
 }
 
 /**
- * ダウンロードを実行する。進捗は onProgress で通知。
+ * 画質の優先順位（yt-dlp の -S）を組み立てる。
+ *
+ * -S を指定しないと yt-dlp の既定順で選ばれ、HDR や高フレームレートが
+ * 考慮されない。ここで明示することで「解像度 → フレームレート → HDR →
+ * 映像コーデック → 音声チャンネル数 → 音声コーデック → ビットレート」の
+ * 順に効かせる。
  */
-async function download(job, { onProgress, onLog, signal } = {}) {
-  const cfg = settings.get();
+function buildSortFields(cfg) {
+  const fields = [];
+  // 上限を設けると、それを超えない範囲で最良のものが選ばれる
+  if (cfg.maxHeight) fields.push(`res:${cfg.maxHeight}`);
+
+  if (cfg.qualityPreset === 'compat') {
+    // 再生互換を優先: H.264 + AAC を選ばせる（無ければ通常の順で妥協する）
+    fields.push('res', 'fps', 'vcodec:h264', 'acodec:aac', 'br');
+  } else {
+    // 既定は画質優先。hdr:12 は Dolby Vision まで含めて HDR を上位に置く
+    fields.push('res', 'fps', 'hdr:12', 'vcodec', 'channels', 'acodec', 'br');
+  }
+  return fields;
+}
+
+/** 再エンコードが発生する = 音質が落ちる形式 */
+const LOSSY_AUDIO = ['mp3', 'aac', 'opus', 'vorbis'];
+
+/**
+ * ダウンロード用の yt-dlp 引数を組み立てる。
+ * 実行と切り離してあるので、引数の組み立て方だけを単体で検証できる。
+ */
+function buildDownloadArgs(job, cfg) {
   const outDir = job.outDir || cfg.downloadDir;
   const template = path.join(outDir, '%(title).150B [%(id)s].%(ext)s');
 
   const args = [
-    ...baseArgs({ headers: job.headers, cookieFile: job.cookieFile }),
+    ...baseArgs({ headers: job.headers, cookieFile: job.cookieFile, cfg }),
     '--newline',
     '--progress',
     '--progress-template',
@@ -402,19 +447,37 @@ async function download(job, { onProgress, onLog, signal } = {}) {
     '-o',
     template,
     '-f',
-    buildSelector(job)
+    buildSelector(job),
+    '-S',
+    buildSortFields(cfg).join(',')
   ];
 
   if (job.mode === 'audio') {
-    args.push('-x', '--audio-format', job.audioFormat || 'mp3', '--audio-quality', '0');
+    const format = job.audioFormat || 'best';
+    args.push('-x', '--audio-format', format);
+    // 可逆な取り出し（best / flac / wav）では品質指定に意味がなく、
+    // 付けると余計な再エンコードを招くので、非可逆のときだけ付ける
+    if (LOSSY_AUDIO.includes(format)) args.push('--audio-quality', '0');
   } else {
-    args.push('--merge-output-format', cfg.container || 'mp4');
+    // 'mp4/mkv' のように / 区切りで書くと、mp4 に収まらないコーデック
+    // （AV1 + Opus など）のときだけ mkv へ落ちる。再エンコードは起きない
+    args.push('--merge-output-format', cfg.container || 'mp4/mkv');
   }
+
   if (job.subtitles) {
     args.push('--write-subs', '--write-auto-subs', '--sub-langs', 'ja,en,-live_chat', '--embed-subs');
   }
   if (job.embedThumbnail) args.push('--embed-thumbnail');
   args.push(job.url);
+  return args;
+}
+
+/**
+ * ダウンロードを実行する。進捗は onProgress で通知。
+ */
+async function download(job, { onProgress, onLog, signal } = {}) {
+  const cfg = settings.get();
+  const args = buildDownloadArgs(job, cfg);
 
   let destination = null;
   let merged = null;
@@ -462,6 +525,8 @@ module.exports = {
   download,
   EngineError,
   buildSelector,
+  buildSortFields,
+  buildDownloadArgs,
   normalizeFormats,
   tokenizeArgs
 };
