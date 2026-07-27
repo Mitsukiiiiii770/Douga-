@@ -1,0 +1,45 @@
+{
+  "name": "douga",
+  "version": "0.1.0",
+  "description": "動画抽出・ダウンローダー（デスクトップアプリ）",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "test": "node test/run.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.douga.app",
+    "productName": "Douga",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}

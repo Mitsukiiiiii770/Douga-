@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; font-src 'self';"
+    />
+    <title>Douga</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">▶</span>
+        <span class="brand-name">Douga</span>
+      </div>
+      <nav class="tabs" id="tabs">
+        <button class="tab is-active" data-tab="download">ダウンロード</button>
+        <button class="tab" data-tab="queue">
+          キュー<span class="badge" id="queue-badge" hidden>0</span>
+        </button>
+        <button class="tab" data-tab="settings">設定</button>
+      </nav>
+      <div class="bridge-state" id="bridge-state" title="拡張機能との接続状態">
+        <span class="dot" id="bridge-dot"></span>
+        <span id="bridge-label">接続待機中</span>
+      </div>
+    </header>
+
+    <main>
+      <!-- ダウンロードタブ -->
+      <section class="panel is-active" data-panel="download">
+        <div class="url-bar">
+          <input
+            id="url-input"
+            type="url"
+            placeholder="動画ページの URL、または .m3u8 / .mpd / .mp4 の直リンクを貼り付け"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button id="probe-btn" class="primary">解析</button>
+          <button id="probe-cancel" class="ghost" hidden>中止</button>
+        </div>
+
+        <div class="hint" id="probe-hint">
+          拡張機能からページを送ると、ここに自動で読み込まれます。
+        </div>
+
+        <div class="notice error" id="probe-error" hidden></div>
+
+        <div class="result" id="result" hidden>
+          <div class="result-head">
+            <img class="thumb" id="result-thumb" alt="" hidden />
+            <div class="result-meta">
+              <h2 id="result-title"></h2>
+              <p class="muted" id="result-sub"></p>
+            </div>
+          </div>
+
+          <div class="options">
+            <label class="field">
+              <span>形式</span>
+              <select id="mode-select">
+                <option value="best">最高画質（映像＋音声）</option>
+                <option value="format">画質を選ぶ</option>
+                <option value="audio">音声のみ</option>
+              </select>
+            </label>
+
+            <label class="field" id="format-field" hidden>
+              <span>画質</span>
+              <select id="format-select"></select>
+            </label>
+
+            <label class="field" id="audio-field" hidden>
+              <span>音声形式</span>
+              <select id="audio-select">
+                <option value="mp3">mp3</option>
+                <option value="m4a">m4a</option>
+                <option value="opus">opus</option>
+                <option value="wav">wav</option>
+              </select>
+            </label>
+
+            <label class="check">
+              <input type="checkbox" id="opt-subs" />
+              <span>字幕を埋め込む</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="opt-thumb" />
+              <span>サムネイルを埋め込む</span>
+            </label>
+          </div>
+
+          <div class="result-actions">
+            <button id="add-btn" class="primary">ダウンロード</button>
+            <span class="muted" id="save-to"></span>
+          </div>
+        </div>
+
+        <div class="result" id="playlist" hidden>
+          <h2 id="playlist-title"></h2>
+          <p class="muted" id="playlist-sub"></p>
+          <ul class="playlist-list" id="playlist-list"></ul>
+        </div>
+
+        <div class="captured" id="captured" hidden>
+          <h3>拡張機能が検出した動画</h3>
+          <p class="muted" id="captured-page"></p>
+          <ul class="candidate-list" id="candidate-list"></ul>
+        </div>
+      </section>
+
+      <!-- キュータブ -->
+      <section class="panel" data-panel="queue">
+        <div class="queue-head">
+          <h2>ダウンロードキュー</h2>
+          <button id="clear-finished" class="ghost">完了したものを消す</button>
+        </div>
+        <ul class="job-list" id="job-list"></ul>
+        <p class="empty" id="queue-empty">キューは空です。</p>
+      </section>
+
+      <!-- 設定タブ -->
+      <section class="panel" data-panel="settings">
+        <h2>設定</h2>
+
+        <div class="setting-group">
+          <h3>保存先</h3>
+          <div class="row">
+            <code id="download-dir"></code>
+            <button id="choose-dir" class="ghost">変更</button>
+            <button id="open-dir" class="ghost">開く</button>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <h3>実行ファイル</h3>
+          <div class="binary-row" id="ytdlp-row">
+            <div>
+              <strong>yt-dlp</strong>
+              <span class="status" id="ytdlp-status">確認中…</span>
+              <code id="ytdlp-path"></code>
+            </div>
+            <div class="row">
+              <button class="ghost" data-install="ytdlp">自動インストール</button>
+              <button class="ghost" data-choose="ytdlp">手動で選ぶ</button>
+            </div>
+          </div>
+          <div class="binary-row" id="ffmpeg-row">
+            <div>
+              <strong>ffmpeg</strong>
+              <span class="status" id="ffmpeg-status">確認中…</span>
+              <code id="ffmpeg-path"></code>
+            </div>
+            <div class="row">
+              <button class="ghost" data-install="ffmpeg">自動インストール</button>
+              <button class="ghost" data-choose="ffmpeg">手動で選ぶ</button>
+            </div>
+          </div>
+          <p class="muted" id="install-progress" hidden></p>
+        </div>
+
+        <div class="setting-group">
+          <h3>ダウンロード動作</h3>
+          <div class="row">
+            <label class="field">
+              <span>同時ダウンロード数</span>
+              <input type="number" id="max-concurrent" min="1" max="8" />
+            </label>
+            <label class="field">
+              <span>セグメント並列数</span>
+              <input type="number" id="concurrent-fragments" min="1" max="16" />
+            </label>
+            <label class="field">
+              <span>出力コンテナ</span>
+              <select id="container-select">
+                <option value="mp4">mp4</option>
+                <option value="mkv">mkv</option>
+                <option value="webm">webm</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <h3>ブラウザ拡張機能との連携</h3>
+          <div class="row">
+            <label class="field">
+              <span>待ち受けポート</span>
+              <input type="number" id="bridge-port" min="1024" max="65535" />
+            </label>
+            <label class="check">
+              <input type="checkbox" id="bridge-enabled" />
+              <span>連携を有効にする</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="accept-cookies" />
+              <span>拡張機能からの Cookie を受け取る</span>
+            </label>
+          </div>
+          <p class="muted">
+            Cookie の受け取りを有効にすると、ログインが必要なサイトの動画も取得できます。Cookie
+            は一時ファイルに書き出され、ジョブ完了時とアプリ終了時に削除されます。
+          </p>
+          <p class="notice" id="bridge-error" hidden></p>
+          <h4>接続済みの拡張機能</h4>
+          <ul class="client-list" id="client-list"></ul>
+          <button id="regen-token" class="ghost danger">トークンを再発行（全解除）</button>
+        </div>
+
+        <div class="setting-group">
+          <h3>注意</h3>
+          <p class="muted">
+            DRM（Widevine / PlayReady / FairPlay）で保護された動画には対応していません。
+            各サイトの利用規約と著作権法の範囲内でご利用ください。
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

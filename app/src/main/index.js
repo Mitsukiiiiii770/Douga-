@@ -1,0 +1,232 @@
+'use strict';
+
+const path = require('path');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+
+const settings = require('./settings');
+const binaries = require('./binaries');
+const engine = require('./engine');
+const queue = require('./queue');
+const bridge = require('./bridge');
+const cookies = require('./cookies');
+
+let mainWindow = null;
+/** 解析中のリクエストを id で中断できるようにする */
+const probeControllers = new Map();
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1080,
+    height: 760,
+    minWidth: 860,
+    minHeight: 560,
+    backgroundColor: '#14161c',
+    title: 'Douga',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+
+  // 外部リンクは既定のブラウザで開く
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+function send(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function focusWindow() {
+  if (!mainWindow) return createWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/* ---------------- 単一インスタンス ---------------- */
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', focusWindow);
+}
+
+/* ---------------- ブリッジ ---------------- */
+
+bridge.onPairRequest = async (origin, name) => {
+  focusWindow();
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['許可', '拒否'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'ブラウザ拡張機能からの接続',
+    message: 'ブラウザ拡張機能が Douga への接続を求めています。',
+    detail: `拡張機能: ${name}\n識別子: ${origin}\n\n心当たりがない場合は「拒否」を選んでください。`,
+    noLink: true
+  });
+  return response === 0;
+};
+
+bridge.on('capture', (capture) => {
+  focusWindow();
+  send('capture:incoming', capture);
+});
+
+bridge.on('status', (status) => send('bridge:status', status));
+bridge.on('paired', (client) => send('bridge:paired', client));
+
+/* ---------------- キュー ---------------- */
+
+queue.on('update', (job) => send('job:update', job));
+queue.on('removed', (id) => send('job:removed', id));
+
+/* ---------------- IPC ---------------- */
+
+ipcMain.handle('settings:get', () => settings.get());
+
+ipcMain.handle('settings:set', async (_event, patch) => {
+  const before = settings.get();
+  const after = settings.set(patch || {});
+  if (before.bridgePort !== after.bridgePort || before.bridgeEnabled !== after.bridgeEnabled) {
+    if (after.bridgeEnabled) await bridge.start();
+    else bridge.stop();
+    send('bridge:status', bridge.status());
+  }
+  return after;
+});
+
+ipcMain.handle('settings:chooseDir', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath: settings.get().downloadDir
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  settings.set({ downloadDir: result.filePaths[0] });
+  return result.filePaths[0];
+});
+
+ipcMain.handle('settings:chooseBinary', async (_event, which) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: which === 'ffmpeg' ? 'ffmpeg の実行ファイルを選択' : 'yt-dlp の実行ファイルを選択'
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  const chosen = result.filePaths[0];
+  settings.set(which === 'ffmpeg' ? { ffmpegPath: chosen } : { ytdlpPath: chosen });
+  return chosen;
+});
+
+ipcMain.handle('bridge:status', () => bridge.status());
+
+ipcMain.handle('bridge:unpair', (_event, origin) => {
+  const cfg = settings.get();
+  settings.set({ pairedClients: cfg.pairedClients.filter((c) => c.origin !== origin) });
+  return bridge.status();
+});
+
+ipcMain.handle('bridge:regenerateToken', async () => {
+  const crypto = require('crypto');
+  settings.set({ token: crypto.randomBytes(24).toString('hex'), pairedClients: [] });
+  return bridge.status();
+});
+
+ipcMain.handle('binaries:status', () => binaries.status());
+
+ipcMain.handle('binaries:install', async (_event, which) => {
+  const onProgress = (p) => send('binaries:progress', p);
+  if (which === 'ffmpeg') await binaries.installFfmpeg(onProgress);
+  else await binaries.installYtdlp(onProgress);
+  return binaries.status();
+});
+
+ipcMain.handle('engine:probe', async (_event, { id, url, headers, cookies: cookieList }) => {
+  const controller = new AbortController();
+  if (id) probeControllers.set(id, controller);
+  const cookieFile = settings.get().acceptCookies ? cookies.write(cookieList) : null;
+  try {
+    const info = await engine.probe(url, {
+      headers,
+      cookieFile,
+      signal: controller.signal
+    });
+    // 後続のダウンロードでも同じ Cookie を使えるようにパスを返す
+    return { ok: true, info, cookieFile };
+  } catch (err) {
+    cookies.remove(cookieFile);
+    return { ok: false, error: err.message, detail: err.detail || null };
+  } finally {
+    if (id) probeControllers.delete(id);
+  }
+});
+
+ipcMain.handle('engine:cancelProbe', (_event, id) => {
+  const controller = probeControllers.get(id);
+  if (controller) controller.abort();
+  return true;
+});
+
+ipcMain.handle('job:list', () => queue.list());
+ipcMain.handle('job:add', (_event, spec) => queue.add(spec));
+ipcMain.handle('job:cancel', (_event, id) => queue.cancel(id));
+ipcMain.handle('job:retry', (_event, id) => queue.retry(id));
+ipcMain.handle('job:remove', (_event, id) => queue.remove(id));
+ipcMain.handle('job:clearFinished', () => {
+  queue.clearFinished();
+  return queue.list();
+});
+
+ipcMain.handle('shell:showItem', (_event, filePath) => {
+  if (!filePath) return false;
+  shell.showItemInFolder(filePath);
+  return true;
+});
+
+ipcMain.handle('shell:openPath', async (_event, target) => {
+  if (!target) return false;
+  const error = await shell.openPath(target);
+  return !error;
+});
+
+ipcMain.handle('shell:openExternal', async (_event, url) => {
+  if (!/^https?:\/\//i.test(url || '')) return false;
+  await shell.openExternal(url);
+  return true;
+});
+
+/* ---------------- ライフサイクル ---------------- */
+
+app.whenReady().then(async () => {
+  cookies.clearAll();
+  createWindow();
+  await bridge.start();
+  send('bridge:status', bridge.status());
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  bridge.stop();
+  cookies.clearAll();
+});

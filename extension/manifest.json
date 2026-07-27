@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Douga - 動画検出＆ダウンロード",
+  "version": "0.1.0",
+  "description": "開いているページの動画（HLS / DASH / 直リンク）を検出し、Douga デスクトップアプリに送ってダウンロードします。",
+  "minimum_chrome_version": "116",
+  "permissions": ["webRequest", "storage", "tabs", "cookies"],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Douga"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
