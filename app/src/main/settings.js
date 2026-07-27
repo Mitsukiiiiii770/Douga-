@@ -15,7 +15,10 @@ const DEFAULTS = {
   bridgeEnabled: true,
   token: '',
   pairedClients: [],
-  container: 'mp4',
+  // mp4 に収まらないコーデックのときだけ mkv へ落とす（再エンコードなし）
+  container: 'mp4/mkv',
+  qualityPreset: 'max',
+  maxHeight: 0,
   acceptCookies: true,
   extraArgs: ''
 };

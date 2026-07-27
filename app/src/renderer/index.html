@@ -77,10 +77,12 @@
             <label class="field" id="audio-field" hidden>
               <span>音声形式</span>
               <select id="audio-select">
-                <option value="mp3">mp3</option>
-                <option value="m4a">m4a</option>
-                <option value="opus">opus</option>
-                <option value="wav">wav</option>
+                <option value="best">元の音質のまま（再エンコードなし）</option>
+                <option value="flac">flac（可逆・ファイル大）</option>
+                <option value="wav">wav（可逆・ファイル大）</option>
+                <option value="m4a">m4a（再エンコード）</option>
+                <option value="mp3">mp3（再エンコード）</option>
+                <option value="opus">opus（再エンコード）</option>
               </select>
             </label>
 
@@ -175,14 +177,36 @@
               <input type="number" id="concurrent-fragments" min="1" max="16" />
             </label>
             <label class="field">
+              <span>画質の優先度</span>
+              <select id="quality-preset">
+                <option value="max">画質優先（HDR・高fps・AV1 を選ぶ）</option>
+                <option value="compat">互換性優先（H.264 + AAC を選ぶ）</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>解像度の上限</span>
+              <select id="max-height">
+                <option value="0">制限なし（最高画質）</option>
+                <option value="2160">4K (2160p) まで</option>
+                <option value="1440">1440p まで</option>
+                <option value="1080">1080p まで</option>
+                <option value="720">720p まで</option>
+              </select>
+            </label>
+            <label class="field">
               <span>出力コンテナ</span>
               <select id="container-select">
-                <option value="mp4">mp4</option>
-                <option value="mkv">mkv</option>
-                <option value="webm">webm</option>
+                <option value="mp4/mkv">mp4（収まらなければ mkv）</option>
+                <option value="mkv">常に mkv</option>
+                <option value="mp4">常に mp4</option>
               </select>
             </label>
           </div>
+          <p class="muted">
+            「常に mp4」は、AV1 や Opus など mp4 に収まらないコーデックを選んだときに
+            再エンコードが発生し、画質が落ちることがあります。既定の「収まらなければ
+            mkv」なら常に無劣化です。
+          </p>
           <label class="field" style="margin-top: 14px">
             <span>追加の yt-dlp オプション（上級者向け）</span>
             <input
