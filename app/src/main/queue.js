@@ -1,20 +1,40 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
+const { app } = require('electron');
 const engine = require('./engine');
 const postprocess = require('./postprocess');
 const cookies = require('./cookies');
 const settings = require('./settings');
 
+/** 実行中とみなす状態。アプリ終了で中断されるのはこれら */
+const ACTIVE_STATUSES = ['queued', 'downloading', 'processing', 'enhancing'];
+
+/** 履歴として残す完了済みジョブの上限 */
+const MAX_HISTORY = 200;
+
 /**
  * ダウンロードジョブのキュー。設定の maxConcurrent まで並列に走らせる。
+ *
+ * ジョブはディスクにも書き出しており、アプリを再起動しても一覧が残る。
+ * ただし勝手に再開はしない。起動と同時にダウンロードが走り出すのは
+ * 挙動として驚きが大きいので、中断扱いにして「再開」を明示させる。
  */
 class Queue extends EventEmitter {
   constructor() {
     super();
     this.jobs = new Map();
     this.running = new Set();
+    this.saveTimer = null;
+    this.storePath = null;
+  }
+
+  file() {
+    if (!this.storePath) this.storePath = path.join(app.getPath('userData'), 'jobs.json');
+    return this.storePath;
   }
 
   list() {
@@ -27,8 +47,89 @@ class Queue extends EventEmitter {
     return { ...rest, hasCookies: !!cookieFile };
   }
 
+  /** 保存用。Cookie のパスは終了時に消えるので持ち越さない */
+  persistable(job) {
+    const { controller, cookieFile, ...rest } = job;
+    return rest;
+  }
+
+  /**
+   * 起動時に前回のジョブを読み込む。
+   * 実行中だったものは「中断」にして、再開はユーザーの操作に委ねる。
+   */
+  restore() {
+    let stored;
+    try {
+      stored = JSON.parse(fs.readFileSync(this.file(), 'utf8'));
+    } catch {
+      return 0;
+    }
+    if (!Array.isArray(stored)) return 0;
+
+    for (const saved of stored) {
+      if (!saved || !saved.id || !saved.url) continue;
+      const job = {
+        ...saved,
+        controller: null,
+        cookieFile: null,
+        status: ACTIVE_STATUSES.includes(saved.status) ? 'interrupted' : saved.status,
+        speed: null,
+        eta: null
+      };
+      this.jobs.set(job.id, job);
+    }
+    return this.jobs.size;
+  }
+
+  /** 書き込みが集中しないよう、少し遅らせてまとめて保存する */
+  save() {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.saveNow();
+    }, 500);
+  }
+
+  saveNow() {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    try {
+      const all = [...this.jobs.values()];
+      const active = all.filter((j) => ACTIVE_STATUSES.includes(j.status));
+      const finished = all
+        .filter((j) => !ACTIVE_STATUSES.includes(j.status))
+        .slice(-MAX_HISTORY);
+      fs.mkdirSync(path.dirname(this.file()), { recursive: true });
+      fs.writeFileSync(
+        this.file(),
+        JSON.stringify([...active, ...finished].map((j) => this.persistable(j)), null, 2)
+      );
+    } catch (err) {
+      console.error('キューの保存に失敗:', err);
+    }
+  }
+
   emitUpdate(job) {
     this.emit('update', this.serialize(job));
+    this.save();
+  }
+
+  /** 中断されたジョブをまとめて待機中に戻す */
+  resumeInterrupted() {
+    let count = 0;
+    for (const job of this.jobs.values()) {
+      if (job.status === 'interrupted') {
+        job.status = 'queued';
+        job.progress = 0;
+        job.error = null;
+        this.emitUpdate(job);
+        count++;
+      }
+    }
+    if (count) this.pump();
+    return count;
   }
 
   add(spec) {
@@ -162,7 +263,7 @@ class Queue extends EventEmitter {
       job.controller.abort();
       return true;
     }
-    if (job.status === 'queued') {
+    if (job.status === 'queued' || job.status === 'interrupted') {
       job.status = 'canceled';
       this.emitUpdate(job);
       return true;
@@ -173,6 +274,9 @@ class Queue extends EventEmitter {
   retry(id) {
     const job = this.jobs.get(id);
     if (!job || this.running.has(id)) return false;
+    // 完了済みを取り直す場合、前回の後処理の痕跡は消しておく
+    job.postProcessError = null;
+    job.sourcePath = null;
     job.status = 'queued';
     job.progress = 0;
     job.error = null;
@@ -188,18 +292,24 @@ class Queue extends EventEmitter {
     cookies.remove(job.cookieFile);
     this.jobs.delete(id);
     this.emit('removed', id);
+    this.saveNow();
     this.pump();
     return true;
   }
 
   clearFinished() {
     for (const [id, job] of [...this.jobs]) {
-      if (['completed', 'error', 'canceled'].includes(job.status)) {
+      if (!ACTIVE_STATUSES.includes(job.status)) {
         this.jobs.delete(id);
         this.emit('removed', id);
       }
     }
+    this.saveNow();
   }
 }
 
-module.exports = new Queue();
+const instance = new Queue();
+// クラス側も出しておく。テストで独立したインスタンスを作れるようにするため
+instance.Queue = Queue;
+instance.ACTIVE_STATUSES = ACTIVE_STATUSES;
+module.exports = instance;

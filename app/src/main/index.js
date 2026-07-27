@@ -214,6 +214,7 @@ ipcMain.handle('job:clearFinished', () => {
   queue.clearFinished();
   return queue.list();
 });
+ipcMain.handle('job:resumeInterrupted', () => queue.resumeInterrupted());
 
 ipcMain.handle('shell:showItem', (_event, filePath) => {
   if (!filePath) return false;
@@ -237,6 +238,8 @@ ipcMain.handle('shell:openExternal', async (_event, url) => {
 
 app.whenReady().then(async () => {
   cookies.clearAll();
+  // 前回のキューを読み込む（実行中だったものは「中断」になる）
+  queue.restore();
   createWindow();
   await bridge.start();
   send('bridge:status', bridge.status());
@@ -252,5 +255,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   bridge.stop();
+  // 遅延書き込みが残っていると終了時に失われるので、確実に吐き出す
+  queue.saveNow();
   cookies.clearAll();
 });
