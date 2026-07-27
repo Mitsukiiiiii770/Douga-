@@ -175,6 +175,11 @@ li:first-child {
   min-width: 0;
 }
 
+/* 短命な実体 URL や広告配信は目立たせない */
+li.is-demoted {
+  opacity: 0.5;
+}
+
 .item-name {
   font-size: 12px;
   white-space: nowrap;

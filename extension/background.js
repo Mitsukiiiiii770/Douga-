@@ -7,6 +7,9 @@
  * chrome.storage.session にも書き戻して復帰できるようにしている。
  */
 
+importScripts('site-hints.js');
+const hints = self.DougaSiteHints;
+
 const MANIFEST_RE = /\.(m3u8|mpd|ism(?:\/manifest)?)(\?|$)/i;
 const MEDIA_FILE_RE = /\.(mp4|webm|mkv|mov|m4v|flv|avi|ogv|m4a|mp3|aac|opus|wav)(\?|$)/i;
 const SEGMENT_RE = /\.(ts|m4s|cmfv|cmfa|aac|dash)(\?|$)/i;
@@ -38,7 +41,8 @@ function persist(tabId) {
         headers: entry.headers,
         pageUrl: entry.pageUrl,
         pageTitle: entry.pageTitle,
-        usesMediaSource: !!entry.usesMediaSource
+        usesMediaSource: !!entry.usesMediaSource,
+        pageTarget: entry.pageTarget || ''
       }
     })
     .catch(() => { /* セッションストレージ未対応時は無視 */ });
@@ -56,6 +60,7 @@ async function restore(tabId) {
     entry.pageUrl = saved.pageUrl || '';
     entry.pageTitle = saved.pageTitle || '';
     entry.usesMediaSource = !!saved.usesMediaSource;
+    entry.pageTarget = saved.pageTarget || '';
   }
   return entry;
 }
@@ -117,7 +122,9 @@ function record(tabId, url, kind, extra = {}) {
     size: extra.size || null,
     label: labelFor(url, kind, extra.size),
     seenAt: Date.now(),
-    source: extra.source || 'network'
+    source: extra.source || 'network',
+    // YouTube の実体 URL や広告配信は一覧の下に沈める
+    demoted: hints.isDemoted(url)
   });
   persist(tabId);
   updateBadge(tabId);
@@ -180,6 +187,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // ページ遷移で候補をリセット
     entry.candidates.clear();
     entry.segments = 0;
+    entry.pageTarget = '';
+    entry.usesMediaSource = false;
     updateBadge(tabId);
   }
   if (tab && tab.url) entry.pageUrl = tab.url;
@@ -206,6 +215,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       const entry = stateFor(tabId);
       entry.usesMediaSource = entry.usesMediaSource || !!message.usesMediaSource;
+      // X のように、ページ URL ではなく投稿の個別 URL を渡す必要があるサイト用
+      if (message.pageTarget) entry.pageTarget = message.pageTarget;
       persist(tabId);
       return sendResponse({ ok: true });
     }
@@ -217,7 +228,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         candidates: [...entry.candidates.values()].sort((a, b) => rank(b) - rank(a)),
         segments: entry.segments,
         headers: entry.headers,
-        usesMediaSource: !!entry.usesMediaSource
+        usesMediaSource: !!entry.usesMediaSource,
+        pageTarget: entry.pageTarget || ''
       });
     }
 
@@ -235,8 +247,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // 非同期レスポンス
 });
 
-/** マニフェストを最優先、次に大きいファイル */
+/** マニフェストを最優先、次に大きいファイル。降格された URL は最後に回す */
 function rank(candidate) {
+  if (candidate.demoted) return -1e15 + (candidate.size || 0);
   const base = candidate.kind === 'hls' || candidate.kind === 'dash' ? 1e12 : 0;
   return base + (candidate.size || 0);
 }

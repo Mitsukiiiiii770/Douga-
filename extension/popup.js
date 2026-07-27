@@ -4,9 +4,27 @@ import { config, ping, pair, capture, collectCookies } from './app-client.js';
 
 const $ = (id) => document.getElementById(id);
 
+const hints = window.DougaSiteHints;
+
 let currentTab = null;
-let detection = { candidates: [], headers: {}, usesMediaSource: false, segments: 0 };
+let detection = {
+  candidates: [],
+  headers: {},
+  usesMediaSource: false,
+  segments: 0,
+  pageTarget: ''
+};
 let connection = { running: false, paired: false };
+
+/**
+ * 「このページをアプリで開く」で実際に渡す URL。
+ * X のようにタイムライン上で再生するサイトでは、content script が
+ * 拾った投稿の個別 URL を優先する。
+ */
+function pageTargetUrl() {
+  const raw = detection.pageTarget || (currentTab && currentTab.url) || '';
+  return hints ? hints.normalizePageUrl(raw) : raw;
+}
 
 function toast(message, isError = false) {
   const el = $('toast');
@@ -58,12 +76,28 @@ function shortUrl(url) {
   }
 }
 
+function renderTarget() {
+  const note = hints && currentTab ? hints.noteFor(currentTab.url) : null;
+  if (note) $('site-note').textContent = note;
+
+  const target = pageTargetUrl();
+  const el = $('page-target');
+  // ページ URL と違う URL を渡す場合だけ、何を送るのか明示する
+  if (target && currentTab && target !== currentTab.url) {
+    el.textContent = `送信先: ${target}`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+
 function renderList() {
   const list = $('list');
   list.innerHTML = '';
 
   for (const candidate of detection.candidates) {
     const li = document.createElement('li');
+    if (candidate.demoted) li.classList.add('is-demoted');
 
     const main = document.createElement('div');
     main.className = 'item-main';
@@ -151,9 +185,11 @@ async function loadDetection() {
       candidates: response.candidates || [],
       headers: response.headers || {},
       usesMediaSource: !!response.usesMediaSource,
-      segments: response.segments || 0
+      segments: response.segments || 0,
+      pageTarget: response.pageTarget || ''
     };
   }
+  renderTarget();
   renderList();
 }
 
@@ -178,7 +214,7 @@ $('connect-btn').addEventListener('click', async () => {
   renderStatus();
 });
 
-$('send-page').addEventListener('click', () => sendToApp(currentTab.url, $('send-page')));
+$('send-page').addEventListener('click', () => sendToApp(pageTargetUrl(), $('send-page')));
 
 $('refresh').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'clear-candidates', tabId: currentTab.id }).catch(() => {});

@@ -411,6 +411,7 @@ async function loadSettings() {
   $('max-concurrent').value = s.maxConcurrent;
   $('concurrent-fragments').value = s.concurrentFragments;
   $('container-select').value = s.container;
+  $('extra-args').value = s.extraArgs || '';
   $('bridge-port').value = s.bridgePort;
   $('bridge-enabled').checked = s.bridgeEnabled;
   $('accept-cookies').checked = s.acceptCookies;
@@ -457,6 +458,7 @@ for (const [id, key, cast] of [
   ['max-concurrent', 'maxConcurrent', Number],
   ['concurrent-fragments', 'concurrentFragments', Number],
   ['container-select', 'container', String],
+  ['extra-args', 'extraArgs', String],
   ['bridge-port', 'bridgePort', Number]
 ]) {
   $(id).addEventListener('change', async (event) => {
