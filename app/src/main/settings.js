@@ -16,7 +16,8 @@ const DEFAULTS = {
   token: '',
   pairedClients: [],
   container: 'mp4',
-  acceptCookies: true
+  acceptCookies: true,
+  extraArgs: ''
 };
 
 let cache = null;

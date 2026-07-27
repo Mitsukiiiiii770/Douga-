@@ -52,6 +52,45 @@ function headerArgs(headers = {}) {
   return args;
 }
 
+/**
+ * 設定の「追加オプション」をコマンドライン引数に分解する。
+ * サイト側の仕様変更に、コードを直さず yt-dlp のオプションだけで
+ * 追従できるようにするための逃げ道。
+ *
+ *   --extractor-args "youtube:player_client=web_safari"
+ *   → ['--extractor-args', 'youtube:player_client=web_safari']
+ */
+function tokenizeArgs(raw) {
+  if (!raw || typeof raw !== 'string') return [];
+  const tokens = [];
+  let current = '';
+  let quote = null;
+  let started = false;
+
+  for (const char of raw.trim()) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      started = true;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (started) tokens.push(current);
+      current = '';
+      started = false;
+      continue;
+    }
+    current += char;
+    started = true;
+  }
+  if (started) tokens.push(current);
+  return tokens;
+}
+
 function baseArgs({ headers, cookieFile } = {}) {
   const cfg = settings.get();
   const args = [
@@ -71,6 +110,7 @@ function baseArgs({ headers, cookieFile } = {}) {
   if (cfg.concurrentFragments > 1) {
     args.push('--concurrent-fragments', String(cfg.concurrentFragments));
   }
+  args.push(...tokenizeArgs(cfg.extraArgs));
   return args;
 }
 
@@ -338,4 +378,4 @@ async function download(job, { onProgress, onLog, signal } = {}) {
   return { filePath: merged || destination };
 }
 
-module.exports = { probe, download, EngineError, buildSelector, normalizeFormats };
+module.exports = { probe, download, EngineError, buildSelector, normalizeFormats, tokenizeArgs };

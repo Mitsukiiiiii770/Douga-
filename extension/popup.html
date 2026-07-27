@@ -21,7 +21,8 @@
 
     <section class="page-action">
       <button id="send-page" class="primary block">このページをアプリで開く</button>
-      <p class="hint">
+      <p class="hint" id="page-target" hidden></p>
+      <p class="hint" id="site-note">
         YouTube のような動画サイトは、個別のストリームより確実に取得できます。
       </p>
     </section>
@@ -51,6 +52,7 @@
 
     <div class="toast" id="toast" hidden></div>
 
+    <script src="site-hints.js"></script>
     <script type="module" src="popup.js"></script>
   </body>
 </html>
