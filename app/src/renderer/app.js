@@ -93,6 +93,7 @@ async function probe(url, extra = {}) {
   if (!url) return;
   $('url-input').value = url;
   $('probe-error').hidden = true;
+  $('probe-fallback').hidden = true;
   $('result').hidden = true;
   $('playlist').hidden = true;
   setProbing(true);
@@ -104,7 +105,9 @@ async function probe(url, extra = {}) {
     id: state.probeId,
     url,
     headers: state.headers,
-    cookies: extra.cookies || []
+    cookies: extra.cookies || [],
+    // ページを解析できないサイトでは、これらへ自動で切り替わる
+    candidates: extra.candidates || []
   });
   setProbing(false);
   state.probeId = null;
@@ -112,16 +115,32 @@ async function probe(url, extra = {}) {
   if (!response.ok) {
     $('probe-error').textContent = response.error;
     $('probe-error').hidden = false;
+    renderAttempts(response.attempts);
     return;
   }
 
   state.cookieFile = response.cookieFile || null;
+
+  // ページ URL 以外に切り替わった場合は、何を使ったのか黙らずに伝える
+  if (response.usedUrl && response.usedUrl !== url) {
+    $('probe-fallback').textContent =
+      `このページは直接解析できなかったため、検出されたストリームを使いました: ${response.usedUrl}`;
+    $('probe-fallback').hidden = false;
+  }
 
   if (response.info.kind === 'playlist') {
     renderPlaylist(response.info);
     return;
   }
   renderVideo(response.info);
+}
+
+/** 全部失敗したとき、何をどう試したのかを見せる */
+function renderAttempts(attempts) {
+  if (!attempts || attempts.length < 2) return;
+  const lines = attempts.map((a) => `・${a.url}\n　→ ${a.error}`).join('\n');
+  $('probe-fallback').textContent = `試した URL:\n${lines}`;
+  $('probe-fallback').hidden = false;
 }
 
 function setProbing(on) {
@@ -281,7 +300,13 @@ api.bridge.onCapture((capture) => {
 
   showTab('download');
   const target = capture.target || capture.pageUrl;
-  if (target) probe(target, { headers, cookies: capture.cookies });
+  if (target) {
+    probe(target, {
+      headers,
+      cookies: capture.cookies,
+      candidates: capture.candidates
+    });
+  }
 });
 
 /* ---------------- キュー ---------------- */

@@ -153,7 +153,18 @@ class Bridge extends EventEmitter {
         target: typeof body.target === 'string' ? body.target : '',
         headers: body.headers && typeof body.headers === 'object' ? body.headers : {},
         cookies: settings.get().acceptCookies && Array.isArray(body.cookies) ? body.cookies : [],
-        candidates: Array.isArray(body.candidates) ? body.candidates.slice(0, 100) : [],
+        candidates: Array.isArray(body.candidates)
+          ? body.candidates
+              .filter((c) => c && typeof c.url === 'string')
+              .slice(0, 100)
+              .map((c) => ({
+                url: c.url,
+                kind: typeof c.kind === 'string' ? c.kind : '',
+                label: typeof c.label === 'string' ? c.label.slice(0, 300) : '',
+                size: Number.isFinite(c.size) ? c.size : null,
+                noise: !!c.noise
+              }))
+          : [],
         receivedAt: Date.now()
       };
       if (!capture.target && !capture.pageUrl) {

@@ -155,25 +155,34 @@ ipcMain.handle('binaries:install', async (_event, which) => {
   return binaries.status();
 });
 
-ipcMain.handle('engine:probe', async (_event, { id, url, headers, cookies: cookieList }) => {
-  const controller = new AbortController();
-  if (id) probeControllers.set(id, controller);
-  const cookieFile = settings.get().acceptCookies ? cookies.write(cookieList) : null;
-  try {
-    const info = await engine.probe(url, {
-      headers,
-      cookieFile,
-      signal: controller.signal
-    });
-    // 後続のダウンロードでも同じ Cookie を使えるようにパスを返す
-    return { ok: true, info, cookieFile };
-  } catch (err) {
-    cookies.remove(cookieFile);
-    return { ok: false, error: err.message, detail: err.detail || null };
-  } finally {
-    if (id) probeControllers.delete(id);
+ipcMain.handle(
+  'engine:probe',
+  async (_event, { id, url, headers, cookies: cookieList, candidates }) => {
+    const controller = new AbortController();
+    if (id) probeControllers.set(id, controller);
+    const cookieFile = settings.get().acceptCookies ? cookies.write(cookieList) : null;
+    try {
+      // ページ URL がだめでも、拡張機能が検出したストリームへ自動で落ちる
+      const { info, usedUrl, attempts } = await engine.probeChain(url, candidates, {
+        headers,
+        cookieFile,
+        signal: controller.signal
+      });
+      // 後続のダウンロードでも同じ Cookie を使えるようにパスを返す
+      return { ok: true, info, cookieFile, usedUrl, attempts };
+    } catch (err) {
+      cookies.remove(cookieFile);
+      return {
+        ok: false,
+        error: err.message,
+        detail: err.detail || null,
+        attempts: err.attempts || []
+      };
+    } finally {
+      if (id) probeControllers.delete(id);
+    }
   }
-});
+);
 
 ipcMain.handle('engine:cancelProbe', (_event, id) => {
   const controller = probeControllers.get(id);
