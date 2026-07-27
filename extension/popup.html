@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>Douga</title>
+  </head>
+  <body>
+    <header>
+      <div class="brand"><span class="mark">▶</span> Douga</div>
+      <div class="status" id="status">
+        <span class="dot" id="status-dot"></span>
+        <span id="status-text">確認中…</span>
+      </div>
+    </header>
+
+    <div class="connect" id="connect" hidden>
+      <p id="connect-msg"></p>
+      <button id="connect-btn" class="primary">アプリと接続</button>
+    </div>
+
+    <section class="page-action">
+      <button id="send-page" class="primary block">このページをアプリで開く</button>
+      <p class="hint">
+        YouTube のような動画サイトは、個別のストリームより確実に取得できます。
+      </p>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>検出された動画</h2>
+        <button id="refresh" class="link">再スキャン</button>
+      </div>
+      <ul id="list"></ul>
+      <p class="empty" id="empty">
+        まだ見つかっていません。動画を再生してから、もう一度開いてください。
+      </p>
+      <p class="hint" id="mse-hint" hidden>
+        このページは MediaSource（blob:）で再生しています。上の HLS / DASH
+        マニフェストを選ぶか、「このページをアプリで開く」を使ってください。
+      </p>
+    </section>
+
+    <footer>
+      <label class="check">
+        <input type="checkbox" id="send-cookies" />
+        <span>Cookie を一緒に送る（ログインが必要なサイト用）</span>
+      </label>
+      <a href="#" id="open-options">設定</a>
+    </footer>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
