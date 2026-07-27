@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const engine = require('./engine');
+const postprocess = require('./postprocess');
 const cookies = require('./cookies');
 const settings = require('./settings');
 
@@ -47,6 +48,9 @@ class Queue extends EventEmitter {
       cookieFile: spec.cookieFile || null,
       outDir: spec.outDir || settings.get().downloadDir,
       qualityLabel: spec.qualityLabel || '',
+      sourcePath: null,
+      postProcessError: null,
+      encodeSpeed: null,
       status: 'queued',
       progress: 0,
       downloaded: null,
@@ -104,11 +108,39 @@ class Queue extends EventEmitter {
           this.emitUpdate(job);
         }
       });
-      job.status = 'completed';
-      job.progress = 100;
+      job.filePath = result.filePath;
       job.speed = null;
       job.eta = null;
-      job.filePath = result.filePath;
+
+      // 後処理（高画質化）。失敗してもダウンロード自体は成功なので、
+      // 元ファイルは残したまま警告だけ添える
+      const preset = settings.get().postProcess;
+      if (preset && preset !== 'none' && job.filePath) {
+        job.status = 'enhancing';
+        job.progress = 0;
+        this.emitUpdate(job);
+        try {
+          const enhanced = await postprocess.process(job.filePath, {
+            duration: job.duration,
+            signal: job.controller.signal,
+            onProgress: (p) => {
+              if (typeof p.percent === 'number') job.progress = p.percent;
+              if (p.speed) job.encodeSpeed = p.speed;
+              this.emitUpdate(job);
+            }
+          });
+          if (enhanced) {
+            job.sourcePath = job.filePath;
+            job.filePath = enhanced;
+          }
+        } catch (err) {
+          if (err && err.canceled) throw err;
+          job.postProcessError = err.message;
+        }
+      }
+
+      job.status = 'completed';
+      job.progress = 100;
     } catch (err) {
       job.status = err && err.canceled ? 'canceled' : 'error';
       job.error = err ? err.message : String(err);

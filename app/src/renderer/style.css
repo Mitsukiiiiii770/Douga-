@@ -468,6 +468,9 @@ input[type="number"] {
 .job.is-canceled .progress-fill {
   background: var(--text-muted);
 }
+.job.is-enhancing .progress-fill {
+  background: #a78bfa;
+}
 .job.is-processing .progress-fill {
   background: var(--warn);
 }

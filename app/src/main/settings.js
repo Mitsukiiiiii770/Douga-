@@ -20,7 +20,14 @@ const DEFAULTS = {
   qualityPreset: 'max',
   maxHeight: 0,
   acceptCookies: true,
-  extraArgs: ''
+  extraArgs: '',
+  // ダウンロード後の高画質化。既定は無効（再エンコードに時間がかかるため）
+  postProcess: 'none',
+  postProcessCustom: '',
+  postEncoder: 'x264',
+  postCrf: 18,
+  postFrameRate: 30,
+  realesrganPath: ''
 };
 
 let cache = null;

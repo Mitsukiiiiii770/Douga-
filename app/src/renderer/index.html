@@ -223,6 +223,57 @@
         </div>
 
         <div class="setting-group">
+          <h3>ダウンロード後の高画質化</h3>
+          <p class="muted">
+            元動画に無い情報は復元できません。ここでできるのは「配信時の圧縮で入った
+            劣化を取り除くこと」と、Real-ESRGAN を使う場合は「AI が推測した質感を
+            描き足すこと」です。いずれも再エンコードを伴うため時間がかかります。
+          </p>
+          <div class="row">
+            <label class="field">
+              <span>処理内容</span>
+              <select id="post-process"></select>
+            </label>
+            <label class="field">
+              <span>エンコーダ</span>
+              <select id="post-encoder">
+                <option value="x264">H.264（互換性が高い）</option>
+                <option value="x265">H.265（同画質でファイル小）</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>CRF（小さいほど高画質）</span>
+              <input type="number" id="post-crf" min="0" max="51" />
+            </label>
+          </div>
+          <label class="field" style="margin-top: 14px">
+            <span>カスタムフィルタ（指定するとプリセットより優先）</span>
+            <input
+              type="text"
+              id="post-custom"
+              spellcheck="false"
+              placeholder="例: hqdn3d=2:1.5:8:6,scale=iw*2:ih*2:flags=lanczos"
+            />
+          </label>
+          <p class="muted" id="post-note"></p>
+          <div class="binary-row">
+            <div>
+              <strong>Real-ESRGAN</strong>
+              <span class="status" id="realesrgan-status">確認中…</span>
+              <code id="realesrgan-path"></code>
+            </div>
+            <div class="row">
+              <button class="ghost" data-choose="realesrgan">実行ファイルを選ぶ</button>
+            </div>
+          </div>
+          <p class="muted">
+            任意です。入れると AI による超解像が使えますが、全フレームを一時的に
+            画像として書き出すため、1080p 5 分程度で 20〜40GB の空き容量と、
+            Vulkan 対応 GPU が必要です。
+          </p>
+        </div>
+
+        <div class="setting-group">
           <h3>ブラウザ拡張機能との連携</h3>
           <div class="row">
             <label class="field">

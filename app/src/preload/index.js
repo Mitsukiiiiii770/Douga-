@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld('douga', {
     install: (which) => ipcRenderer.invoke('binaries:install', which),
     onProgress: listen('binaries:progress')
   },
+  postprocess: {
+    presets: () => ipcRenderer.invoke('postprocess:presets')
+  },
   engine: {
     probe: (payload) => ipcRenderer.invoke('engine:probe', payload),
     cancelProbe: (id) => ipcRenderer.invoke('engine:cancelProbe', id)

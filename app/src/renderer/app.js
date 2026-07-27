@@ -328,6 +328,7 @@ function renderJob(job) {
     queued: '待機中',
     downloading: 'ダウンロード中',
     processing: '変換中',
+    enhancing: '高画質化中',
     completed: '完了',
     error: 'エラー',
     canceled: 'キャンセル'
@@ -335,6 +336,10 @@ function renderJob(job) {
 
   const details = [statusText];
   if (job.qualityLabel) details.push(job.qualityLabel);
+  if (job.status === 'enhancing') {
+    details.push(`${job.progress.toFixed(1)}%`);
+    if (job.encodeSpeed) details.push(job.encodeSpeed);
+  }
   if (job.status === 'downloading') {
     if (job.total) details.push(`${formatBytes(job.downloaded)} / ${formatBytes(job.total)}`);
     else if (job.downloaded) details.push(formatBytes(job.downloaded));
@@ -442,6 +447,11 @@ async function loadSettings() {
   $('quality-preset').value = s.qualityPreset;
   $('max-height').value = String(s.maxHeight || 0);
   $('extra-args').value = s.extraArgs || '';
+  $('post-process').value = s.postProcess;
+  $('post-encoder').value = s.postEncoder;
+  $('post-crf').value = s.postCrf;
+  $('post-custom').value = s.postProcessCustom || '';
+  renderPostNote();
   $('bridge-port').value = s.bridgePort;
   $('bridge-enabled').checked = s.bridgeEnabled;
   $('accept-cookies').checked = s.acceptCookies;
@@ -491,6 +501,10 @@ for (const [id, key, cast] of [
   ['quality-preset', 'qualityPreset', String],
   ['max-height', 'maxHeight', Number],
   ['extra-args', 'extraArgs', String],
+  ['post-process', 'postProcess', String],
+  ['post-encoder', 'postEncoder', String],
+  ['post-crf', 'postCrf', Number],
+  ['post-custom', 'postProcessCustom', String],
   ['bridge-port', 'bridgePort', Number]
 ]) {
   $(id).addEventListener('change', async (event) => {
@@ -515,8 +529,44 @@ $('regen-token').addEventListener('click', async () => {
 
 /* ---------------- バイナリ ---------------- */
 
+/** 後処理プリセットの一覧を main から取り、選択肢を作る */
+async function loadPostPresets() {
+  const presets = await api.postprocess.presets();
+  const select = $('post-process');
+  select.innerHTML = '';
+  for (const preset of presets) {
+    const option = document.createElement('option');
+    option.value = preset.id;
+    option.textContent = preset.label;
+    select.appendChild(option);
+  }
+}
+
+function renderPostNote() {
+  const preset = $('post-process').value;
+  const custom = $('post-custom').value.trim();
+  const note = $('post-note');
+  if (custom) {
+    note.textContent = 'カスタムフィルタが指定されているため、プリセットは無視されます。';
+    return;
+  }
+  note.textContent =
+    preset === 'none'
+      ? '後処理は行いません。ダウンロードしたファイルがそのまま残ります。'
+      : '元ファイルは残したまま、別名で書き出します。動画の長さによっては数十分かかります。';
+}
+
+$('post-process').addEventListener('change', renderPostNote);
+$('post-custom').addEventListener('input', renderPostNote);
+
 async function refreshBinaries() {
   const status = await api.binaries.status();
+
+  const esrgan = status.realesrgan || { ok: false, path: null };
+  $('realesrgan-status').textContent = esrgan.ok ? '検出済み' : '未検出（任意）';
+  $('realesrgan-status').className = `status ${esrgan.ok ? 'ok' : ''}`;
+  $('realesrgan-path').textContent = esrgan.path || '';
+
   for (const which of ['ytdlp', 'ffmpeg']) {
     const item = status[which];
     const badge = $(`${which}-status`);
@@ -593,6 +643,7 @@ api.bridge.onPaired(async () => {
 /* ---------------- 起動 ---------------- */
 
 (async function init() {
+  await loadPostPresets();
   await loadSettings();
   await refreshBinaries();
   renderBridgeStatus(await api.bridge.status());
