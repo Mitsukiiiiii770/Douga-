@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win",
+    "icons": "node ../tools/generate-icons.js",
     "test": "node test/run.js"
   },
   "author": "",
@@ -29,6 +30,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",

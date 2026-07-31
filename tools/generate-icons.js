@@ -1,11 +1,16 @@
 'use strict';
 
 /**
- * 拡張機能のアイコンを生成する。
+ * 拡張機能とデスクトップアプリのアイコンを生成する。
  *
- *   node extension/icons/generate.js
+ *   npm run icons        （リポジトリ直下で）
+ *   node tools/generate-icons.js
  *
- * 画像ライブラリを入れるほどの絵ではないので、PNG を直接書き出している。
+ * 出力:
+ *   extension/icons/icon-{16,32,48,128}.png   拡張機能
+ *   app/build/icon.ico                        アプリ（インストーラと exe）
+ *
+ * 画像ライブラリを入れるほどの絵ではないので、PNG と ICO を直接書き出している。
  * PNG は「シグネチャ + チャンク列」で、各チャンクは
  * 長さ・種別・データ・CRC32 の並び。必要なのは IHDR / IDAT / IEND の3つだけ。
  */
@@ -129,13 +134,62 @@ function render(size) {
   return encodePng(size, size, pixels);
 }
 
-if (require.main === module) {
-  const outDir = __dirname;
-  for (const size of [16, 32, 48, 128]) {
-    const file = path.join(outDir, `icon-${size}.png`);
-    fs.writeFileSync(file, render(size));
-    console.log(`${path.basename(file)} を生成しました`);
+/**
+ * 複数サイズの PNG をまとめて ICO にする。
+ *
+ * ICO は「ヘッダ + サイズごとの目録 + 画像データ」の並び。
+ * Windows Vista 以降は各画像を PNG のまま埋め込めるので、
+ * ビットマップへ変換せずそのまま入れている。
+ */
+function encodeIco(images) {
+  const HEADER = 6;
+  const ENTRY = 16;
+
+  const header = Buffer.alloc(HEADER);
+  header.writeUInt16LE(0, 0); // 予約領域
+  header.writeUInt16LE(1, 2); // 1 = アイコン
+  header.writeUInt16LE(images.length, 4);
+
+  const entries = [];
+  let offset = HEADER + ENTRY * images.length;
+
+  for (const { size, data } of images) {
+    const entry = Buffer.alloc(ENTRY);
+    // 256 は 1 バイトに収まらないので 0 で表す決まり
+    entry.writeUInt8(size >= 256 ? 0 : size, 0);
+    entry.writeUInt8(size >= 256 ? 0 : size, 1);
+    entry.writeUInt8(0, 2); // パレット数（真彩色なので 0）
+    entry.writeUInt8(0, 3); // 予約領域
+    entry.writeUInt16LE(1, 4); // プレーン数
+    entry.writeUInt16LE(32, 6); // ビット深度
+    entry.writeUInt32LE(data.length, 8);
+    entry.writeUInt32LE(offset, 12);
+    entries.push(entry);
+    offset += data.length;
   }
+
+  return Buffer.concat([header, ...entries, ...images.map((i) => i.data)]);
 }
 
-module.exports = { encodePng, render, crc32 };
+if (require.main === module) {
+  const root = path.join(__dirname, '..');
+
+  const extDir = path.join(root, 'extension', 'icons');
+  fs.mkdirSync(extDir, { recursive: true });
+  for (const size of [16, 32, 48, 128]) {
+    const file = path.join(extDir, `icon-${size}.png`);
+    fs.writeFileSync(file, render(size));
+    console.log(`extension/icons/${path.basename(file)}`);
+  }
+
+  // Windows のインストーラと exe が使うアイコン。256px を含める必要がある
+  const appBuild = path.join(root, 'app', 'build');
+  fs.mkdirSync(appBuild, { recursive: true });
+  const ico = encodeIco(
+    [16, 32, 48, 64, 128, 256].map((size) => ({ size, data: render(size) }))
+  );
+  fs.writeFileSync(path.join(appBuild, 'icon.ico'), ico);
+  console.log('app/build/icon.ico');
+}
+
+module.exports = { encodePng, encodeIco, render, crc32 };
