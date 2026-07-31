@@ -11,6 +11,7 @@ const { spawnSync } = require('child_process');
 const suites = [
   'engine.test.js',
   'quality.test.js',
+  'title.test.js',
   'postprocess.test.js',
   'site-hints.test.js',
   'fallback.test.js',

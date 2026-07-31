@@ -12,7 +12,8 @@ let detection = {
   headers: {},
   usesMediaSource: false,
   segments: 0,
-  pageTarget: ''
+  pageTarget: '',
+  meta: null
 };
 let connection = { running: false, paired: false };
 
@@ -74,6 +75,51 @@ function shortUrl(url) {
   } catch {
     return url;
   }
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  const s = Math.floor(seconds % 60);
+  const m = Math.floor((seconds / 60) % 60);
+  const h = Math.floor(seconds / 3600);
+  const pad = (n) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+/** ページから読み取ったタイトル・サムネ・尺を表示する */
+function renderPreview() {
+  const meta = detection.meta || {};
+  const title = meta.title || (currentTab && currentTab.title) || '';
+  const section = $('preview');
+
+  if (!title && !meta.thumbnail) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+
+  $('preview-title').textContent = title;
+  $('preview-title').title = title;
+
+  const thumb = $('preview-thumb');
+  if (meta.thumbnail) {
+    thumb.src = meta.thumbnail;
+    thumb.hidden = false;
+    // 読み込めない画像で枠だけ残らないようにする
+    thumb.onerror = () => {
+      thumb.hidden = true;
+    };
+  } else {
+    thumb.hidden = true;
+    thumb.removeAttribute('src');
+  }
+
+  const parts = [];
+  const duration = formatDuration(meta.duration);
+  if (duration) parts.push(duration);
+  if (meta.width && meta.height) parts.push(`${meta.width}×${meta.height}`);
+  if (meta.siteName) parts.push(meta.siteName);
+  $('preview-sub').textContent = parts.join(' · ');
 }
 
 function renderTarget() {
@@ -155,6 +201,9 @@ async function sendToApp(target, button) {
       origin: detection.headers.origin || null
     },
     cookies,
+    // yt-dlp がマニフェスト URL からタイトルを作ると "master" になってしまうので、
+    // ページから読み取った情報を渡してアプリ側で優先させる
+    meta: detection.meta || null,
     // アプリ側がページ URL で失敗したときの切り替え先として使う
     candidates: detection.candidates.map((c) => ({
       url: c.url,
@@ -192,9 +241,11 @@ async function loadDetection() {
       headers: response.headers || {},
       usesMediaSource: !!response.usesMediaSource,
       segments: response.segments || 0,
-      pageTarget: response.pageTarget || ''
+      pageTarget: response.pageTarget || '',
+      meta: response.meta || null
     };
   }
+  renderPreview();
   renderTarget();
   renderList();
 }

@@ -312,6 +312,53 @@ async function probe(url, { headers, cookieFile, signal } = {}) {
 }
 
 /**
+ * yt-dlp が URL から機械的に作っただけのタイトルかどうか。
+ *
+ * generic 抽出では URL の最後のセグメントがそのままタイトルになるため、
+ * master.m3u8 なら "master"、index.mpd なら "index" になる。
+ * これをそのままファイル名にすると全部同じ名前で保存されてしまう。
+ */
+function isDerivedTitle(info, url) {
+  if (!info || !info.title) return true;
+  const title = String(info.title).trim();
+  if (!title) return true;
+
+  // 明らかに配信の都合で付いた名前
+  if (/^(master|index|playlist|manifest|video|stream|media|chunklist|prog_index)$/i.test(title)) {
+    return true;
+  }
+
+  let basename = '';
+  try {
+    const path = new URL(url).pathname;
+    basename = decodeURIComponent(path.split('/').filter(Boolean).pop() || '');
+  } catch {
+    return false;
+  }
+  if (!basename) return false;
+
+  // 拡張子あり・なしのどちらでも一致すれば URL 由来とみなす
+  const withoutExt = basename.replace(/\.[a-z0-9]{1,5}$/i, '');
+  return title === basename || title === withoutExt;
+}
+
+/**
+ * yt-dlp の解析結果に、拡張機能がページから読み取った情報を補う。
+ * yt-dlp 側で取れている値は上書きしない（そちらのほうが正確なため）。
+ */
+function applyPageMeta(info, meta) {
+  if (!info || !meta) return info;
+
+  if (meta.title && isDerivedTitle(info, info.url)) {
+    info.title = meta.title;
+    info.titleSource = 'page';
+  }
+  if (!info.thumbnail && meta.thumbnail) info.thumbnail = meta.thumbnail;
+  if (!info.duration && meta.duration) info.duration = meta.duration;
+  return info;
+}
+
+/**
  * 解析対象の並び順を決める。
  *
  * サイトごとの対応表は持たない。yt-dlp は多数のサイトに対応しているので
@@ -360,6 +407,9 @@ async function probeChain(target, candidates, options = {}) {
     try {
       const info = await probe(url, options);
       if (info.kind === 'playlist' || (info.formats && info.formats.length > 0)) {
+        // マニフェストへ落ちた場合、yt-dlp のタイトルは URL 由来で使えない。
+        // 拡張機能がページから読み取ったタイトルで補う
+        applyPageMeta(info, options.meta);
         return { info, usedUrl: url, attempts };
       }
       attempts.push({ url, error: '再生できる形式が見つかりませんでした。' });
@@ -429,13 +479,47 @@ function buildSortFields(cfg) {
 /** 再エンコードが発生する = 音質が落ちる形式 */
 const LOSSY_AUDIO = ['mp3', 'aac', 'opus', 'vorbis'];
 
+/** ファイル名に使えない文字を落とす（Windows の禁止文字に合わせる） */
+function sanitizeFileName(value) {
+  const name = String(value)
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    // 記号が連続すると "___" のような読めない名前になる
+    .replace(/_{2,}/g, '_')
+    // 末尾のドットと空白は Windows が扱えない
+    .replace(/[. ]+$/, '')
+    .trim()
+    .slice(0, 150);
+
+  // 区切り記号しか残らなかった場合は名前として使えない
+  return /[^_.\s]/.test(name) ? name : '';
+}
+
+/**
+ * 出力ファイル名のテンプレートを決める。
+ *
+ * yt-dlp が正しくタイトルを取れているときは、そのまま %(title)s に任せる。
+ * マニフェスト URL へフォールバックした場合は yt-dlp のタイトルが URL 由来
+ * （master.m3u8 → "master"）になってしまうため、ページから読み取った
+ * タイトルをテンプレートに直接埋め込む。
+ */
+function outputTemplateFor(job) {
+  if (job.titleSource === 'page' && job.title) {
+    const name = sanitizeFileName(job.title);
+    if (name) {
+      // テンプレート内の % は yt-dlp の書式指定として解釈されるので退避する
+      return `${name.replace(/%/g, '%%')}.%(ext)s`;
+    }
+  }
+  return '%(title).150B [%(id)s].%(ext)s';
+}
+
 /**
  * ダウンロード用の yt-dlp 引数を組み立てる。
  * 実行と切り離してあるので、引数の組み立て方だけを単体で検証できる。
  */
 function buildDownloadArgs(job, cfg) {
   const outDir = job.outDir || cfg.downloadDir;
-  const template = path.join(outDir, '%(title).150B [%(id)s].%(ext)s');
+  const template = path.join(outDir, outputTemplateFor(job));
 
   const args = [
     ...baseArgs({ headers: job.headers, cookieFile: job.cookieFile, cfg }),
@@ -522,6 +606,10 @@ module.exports = {
   probe,
   probeChain,
   orderTargets,
+  isDerivedTitle,
+  applyPageMeta,
+  outputTemplateFor,
+  sanitizeFileName,
   download,
   EngineError,
   buildSelector,

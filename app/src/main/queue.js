@@ -137,6 +137,8 @@ class Queue extends EventEmitter {
       id: crypto.randomUUID(),
       url: spec.url,
       title: spec.title || spec.url,
+      // 'page' ならページ由来のタイトル。出力ファイル名に直接使う
+      titleSource: spec.titleSource || null,
       thumbnail: spec.thumbnail || null,
       duration: spec.duration || null,
       formatId: spec.formatId || null,

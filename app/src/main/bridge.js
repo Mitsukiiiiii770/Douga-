@@ -8,6 +8,29 @@ const MAX_BODY = 2 * 1024 * 1024; // 2MB（Cookie 込みでも十分）
 const APP_VERSION = require('../../package.json').version;
 
 /**
+ * 拡張機能がページから読み取ったメタ情報を検証する。
+ * ファイル名に使うので、型と長さをここで確定させておく。
+ */
+function sanitizeMeta(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const text = (value, max) =>
+    typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
+  const positive = (value) =>
+    Number.isFinite(value) && value > 0 ? value : null;
+
+  const thumbnail = text(raw.thumbnail, 2000);
+  return {
+    title: text(raw.title, 300),
+    // http(s) 以外は表示に使わない（data: などを弾く）
+    thumbnail: thumbnail && /^https?:\/\//i.test(thumbnail) ? thumbnail : null,
+    duration: positive(Number(raw.duration)),
+    width: positive(Number(raw.width)),
+    height: positive(Number(raw.height)),
+    siteName: text(raw.siteName, 100)
+  };
+}
+
+/**
  * ブラウザ拡張からの接続を受ける localhost 専用サーバー。
  *
  * セキュリティ方針:
@@ -153,6 +176,7 @@ class Bridge extends EventEmitter {
         target: typeof body.target === 'string' ? body.target : '',
         headers: body.headers && typeof body.headers === 'object' ? body.headers : {},
         cookies: settings.get().acceptCookies && Array.isArray(body.cookies) ? body.cookies : [],
+        meta: sanitizeMeta(body.meta),
         candidates: Array.isArray(body.candidates)
           ? body.candidates
               .filter((c) => c && typeof c.url === 'string')
