@@ -73,6 +73,43 @@ section {
   border-bottom: 1px solid var(--border);
 }
 
+/* 検出した動画のプレビュー（サムネ・タイトル・尺） */
+.preview {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.preview-thumb {
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #000;
+  flex-shrink: 0;
+}
+
+.preview-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.preview-title {
+  font-size: 12px;
+  line-height: 1.45;
+  /* 長いタイトルは 3 行で打ち切る */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.preview-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
 .section-head {
   display: flex;
   justify-content: space-between;

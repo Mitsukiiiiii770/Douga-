@@ -114,7 +114,9 @@ async function probe(url, extra = {}) {
     headers: state.headers,
     cookies: extra.cookies || [],
     // ページを解析できないサイトでは、これらへ自動で切り替わる
-    candidates: extra.candidates || []
+    candidates: extra.candidates || [],
+    // マニフェストへ落ちたときに使うタイトル・サムネ・尺
+    meta: extra.meta || null
   });
   setProbing(false);
   state.probeId = null;
@@ -266,6 +268,7 @@ $('add-btn').addEventListener('click', () => {
   api.jobs.add({
     url: state.info.url,
     title: state.info.title,
+    titleSource: state.info.titleSource || null,
     thumbnail: state.info.thumbnail,
     duration: state.info.duration,
     formats: state.info.formats,
@@ -314,7 +317,7 @@ api.bridge.onCapture((capture) => {
     button.className = 'small ghost';
     button.textContent = '解析';
     button.addEventListener('click', () =>
-      probe(candidate.url, { headers, cookies: capture.cookies })
+      probe(candidate.url, { headers, cookies: capture.cookies, meta: capture.meta })
     );
 
     li.append(main, tag, button);
@@ -328,7 +331,8 @@ api.bridge.onCapture((capture) => {
     probe(target, {
       headers,
       cookies: capture.cookies,
-      candidates: capture.candidates
+      candidates: capture.candidates,
+      meta: capture.meta
     });
   }
 });

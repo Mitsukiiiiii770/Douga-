@@ -46,7 +46,8 @@ function persist(tabId) {
         pageUrl: entry.pageUrl,
         pageTitle: entry.pageTitle,
         usesMediaSource: !!entry.usesMediaSource,
-        pageTarget: entry.pageTarget || ''
+        pageTarget: entry.pageTarget || '',
+        meta: entry.meta || null
       }
     })
     .catch(() => { /* セッションストレージ未対応時は無視 */ });
@@ -65,6 +66,7 @@ async function restore(tabId) {
     entry.pageTitle = saved.pageTitle || '';
     entry.usesMediaSource = !!saved.usesMediaSource;
     entry.pageTarget = saved.pageTarget || '';
+    entry.meta = saved.meta || null;
   }
   return entry;
 }
@@ -204,6 +206,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     entry.segments = 0;
     entry.pageTarget = '';
     entry.usesMediaSource = false;
+    entry.meta = null;
     updateBadge(tabId);
   }
   if (tab && tab.url) entry.pageUrl = tab.url;
@@ -232,6 +235,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       entry.usesMediaSource = entry.usesMediaSource || !!message.usesMediaSource;
       // X のように、ページ URL ではなく投稿の個別 URL を渡す必要があるサイト用
       if (message.pageTarget) entry.pageTarget = message.pageTarget;
+      // ページから読み取ったタイトル・サムネ・尺。後から良い値が来たら上書きする
+      if (message.meta) {
+        entry.meta = { ...(entry.meta || {}), ...pruneEmpty(message.meta) };
+      }
       persist(tabId);
       return sendResponse({ ok: true });
     }
@@ -244,7 +251,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         segments: entry.segments,
         headers: entry.headers,
         usesMediaSource: !!entry.usesMediaSource,
-        pageTarget: entry.pageTarget || ''
+        pageTarget: entry.pageTarget || '',
+        meta: entry.meta || null
       });
     }
 
@@ -261,6 +269,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   })();
   return true; // 非同期レスポンス
 });
+
+/** null / 空文字を落とす。既存の良い値を空で上書きしないため */
+function pruneEmpty(obj) {
+  const out = {};
+  for (const [key, value] of Object.entries(obj || {})) {
+    if (value !== null && value !== undefined && value !== '') out[key] = value;
+  }
+  return out;
+}
 
 /** マニフェストを最優先、次に大きいファイル。降格された URL は最後に回す */
 function rank(candidate) {

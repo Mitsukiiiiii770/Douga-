@@ -178,7 +178,7 @@ ipcMain.handle('binaries:install', async (_event, which) => {
 
 ipcMain.handle(
   'engine:probe',
-  async (_event, { id, url, headers, cookies: cookieList, candidates }) => {
+  async (_event, { id, url, headers, cookies: cookieList, candidates, meta }) => {
     const controller = new AbortController();
     if (id) probeControllers.set(id, controller);
     const cookieFile = settings.get().acceptCookies ? cookies.write(cookieList) : null;
@@ -187,6 +187,8 @@ ipcMain.handle(
       const { info, usedUrl, attempts } = await engine.probeChain(url, candidates, {
         headers,
         cookieFile,
+        // ページから読み取ったタイトル等。yt-dlp が取れなかった分だけ補う
+        meta,
         signal: controller.signal
       });
       // 後続のダウンロードでも同じ Cookie を使えるようにパスを返す

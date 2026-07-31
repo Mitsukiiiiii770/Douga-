@@ -11,6 +11,7 @@
 let lastPayload = '';
 
 const hints = self.DougaSiteHints;
+const pageMeta = self.DougaPageMeta;
 
 /** 再生中（または再生されたことのある）メディアを優先して選ぶ */
 function primaryMedia(list) {
@@ -31,6 +32,10 @@ function collect() {
   // 再生中の投稿の個別 URL を対象にしないと yt-dlp が解析できない
   const primary = primaryMedia(mediaElements.filter((m) => m.tagName === 'VIDEO'));
   const pageTarget = hints ? hints.targetForMedia(location.href, primary) : null;
+
+  // マニフェスト URL へフォールバックすると yt-dlp はファイル名からタイトルを
+  // 作ってしまう（master.m3u8 → "master"）。ページ側の情報を保険として渡す
+  const meta = pageMeta ? pageMeta.extract(primary) : null;
 
   for (const media of mediaElements) {
     const urls = new Set();
@@ -56,12 +61,19 @@ function collect() {
     }
   }
 
-  return { sources, usesMediaSource, pageTarget };
+  return { sources, usesMediaSource, pageTarget, meta };
 }
 
 function report() {
   const payload = collect();
-  if (!payload.sources.length && !payload.usesMediaSource && !payload.pageTarget) return;
+  if (
+    !payload.sources.length &&
+    !payload.usesMediaSource &&
+    !payload.pageTarget &&
+    !(payload.meta && payload.meta.title)
+  ) {
+    return;
+  }
 
   const signature = JSON.stringify(payload);
   if (signature === lastPayload) return;
