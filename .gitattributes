@@ -1,0 +1,3 @@
+# Windows のコマンドプロンプトは、括弧ブロックの改行が LF だと誤動作することがある
+*.bat text eol=crlf
+*.cmd text eol=crlf

@@ -23,6 +23,9 @@ function createWindow() {
     minHeight: 560,
     backgroundColor: '#14161c',
     title: 'Douga',
+    // 開発中（npm start）でもタスクバーにアイコンを出す。
+    // インストーラ経由の場合は exe 側のアイコンが使われる
+    icon: path.join(__dirname, '..', '..', 'build', 'icon.ico'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'index.js'),
