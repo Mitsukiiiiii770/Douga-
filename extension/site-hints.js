@@ -18,6 +18,10 @@
  */
 
 (function (root) {
+  /** ホストが指定ドメインか、そのサブドメインか */
+  const matches = (host, domains) =>
+    domains.some((domain) => host === domain || host.endsWith('.' + domain));
+
   const hostOf = (url) => {
     try {
       return new URL(url).hostname.replace(/^www\./, '');
@@ -26,7 +30,10 @@
     }
   };
 
-  /** どのサイトでも動画本体とは無関係な、計測・共有用のクエリ */
+/**
+   * どのサイトでも計測用であることが明らかなクエリ。
+   * 名前が長く固有なので、他の用途とぶつかる心配がない。
+   */
   const TRACKING_PARAMS = [
     'utm_source',
     'utm_medium',
@@ -36,11 +43,21 @@
     'fbclid',
     'gclid',
     'igshid',
-    'si',
     'ref_src',
-    'ref_url',
-    's',
-    'pp'
+    'ref_url'
+  ];
+
+  /**
+   * 短くて一般的な名前のため、全サイトで消すと URL が壊れるもの。
+   * 「そのサイトでは計測用だと分かっている」場合に限って消す。
+   *
+   * 例えば ?s= は検索語やセッション ID に使うサイトが多い。
+   */
+  const SCOPED_TRACKING_PARAMS = [
+    { param: 's', hosts: ['x.com', 'twitter.com'] },
+    { param: 'si', hosts: ['youtube.com', 'youtu.be'] },
+    { param: 'pp', hosts: ['youtube.com', 'youtu.be'] },
+    { param: 'feature', hosts: ['youtube.com', 'youtu.be'] }
   ];
 
   /**
@@ -58,9 +75,15 @@
     /(^|\.)adnxs\.com$/i,
     /(^|\.)scorecardresearch\.com$/i,
     /(^|\.)exoclick\.com$/i,
+    // ExoClick の実際の配信ドメイン。広告動画がそのまま候補に紛れ込む
+    /(^|\.)exosrv\.com$/i,
+    /(^|\.)realsrv\.com$/i,
     /(^|\.)trafficjunky\.net$/i,
     /(^|\.)juicyads\.com$/i,
-    /(^|\.)popads\.net$/i
+    /(^|\.)popads\.net$/i,
+    /(^|\.)tsyndicate\.com$/i,
+    /(^|\.)adsterra\.com$/i,
+    /(^|\.)hilltopads\.net$/i
   ];
 
   /**
@@ -91,6 +114,9 @@
     }
 
     for (const key of TRACKING_PARAMS) url.searchParams.delete(key);
+    for (const { param, hosts } of SCOPED_TRACKING_PARAMS) {
+      if (matches(host, hosts)) url.searchParams.delete(param);
+    }
     return url.toString();
   }
 
