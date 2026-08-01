@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const { app } = require('electron');
 const engine = require('./engine');
+const hls = require('./hls');
 const postprocess = require('./postprocess');
 const cookies = require('./cookies');
 const settings = require('./settings');
@@ -139,6 +140,9 @@ class Queue extends EventEmitter {
       title: spec.title || spec.url,
       // 'page' ならページ由来のタイトル。出力ファイル名に直接使う
       titleSource: spec.titleSource || null,
+      // 'hls' なら yt-dlp ではなく ffmpeg で直接取得する
+      source: spec.source || null,
+      cookieHeader: spec.cookieHeader || null,
       thumbnail: spec.thumbnail || null,
       duration: spec.duration || null,
       formatId: spec.formatId || null,
@@ -181,6 +185,55 @@ class Queue extends EventEmitter {
     if (this.running.size < max) this.pump();
   }
 
+  /** 通常経路。yt-dlp に任せる */
+  runYtdlp(job) {
+    return engine.download(job, {
+      signal: job.controller.signal,
+      onProgress: (p) => {
+        if (p.status === 'processing') {
+          job.status = 'processing';
+        } else if (p.status === 'finished') {
+          job.progress = 100;
+        } else {
+          job.status = 'downloading';
+          job.downloaded = p.downloaded;
+          job.total = p.total;
+          job.speed = p.speed;
+          job.eta = p.eta;
+          if (p.total && p.downloaded) {
+            job.progress = Math.min(100, (p.downloaded / p.total) * 100);
+          } else if (p.fragmentCount && p.fragmentIndex) {
+            job.progress = Math.min(100, (p.fragmentIndex / p.fragmentCount) * 100);
+          }
+        }
+        this.emitUpdate(job);
+      }
+    });
+  }
+
+  /**
+   * 拡張子の無い HLS など、yt-dlp が扱えなかったものを ffmpeg で取得する。
+   * -c copy なので再エンコードは発生しない。
+   */
+  runHls(job) {
+    const format = (job.formats || []).find((f) => f.id === job.formatId) || (job.formats || [])[0];
+    const name = engine.sanitizeFileName(job.title) || `video-${Date.now()}`;
+    const output = path.join(
+      job.outDir || settings.get().downloadDir,
+      `${name}.${hls.containerFor(format)}`
+    );
+
+    return hls.download(job, output, {
+      signal: job.controller.signal,
+      onProgress: (p) => {
+        job.status = 'downloading';
+        if (typeof p.percent === 'number') job.progress = p.percent;
+        if (p.speed) job.encodeSpeed = p.speed;
+        this.emitUpdate(job);
+      }
+    });
+  }
+
   async start(job) {
     job.status = 'downloading';
     job.error = null;
@@ -189,28 +242,9 @@ class Queue extends EventEmitter {
     this.emitUpdate(job);
 
     try {
-      const result = await engine.download(job, {
-        signal: job.controller.signal,
-        onProgress: (p) => {
-          if (p.status === 'processing') {
-            job.status = 'processing';
-          } else if (p.status === 'finished') {
-            job.progress = 100;
-          } else {
-            job.status = 'downloading';
-            job.downloaded = p.downloaded;
-            job.total = p.total;
-            job.speed = p.speed;
-            job.eta = p.eta;
-            if (p.total && p.downloaded) {
-              job.progress = Math.min(100, (p.downloaded / p.total) * 100);
-            } else if (p.fragmentCount && p.fragmentIndex) {
-              job.progress = Math.min(100, (p.fragmentIndex / p.fragmentCount) * 100);
-            }
-          }
-          this.emitUpdate(job);
-        }
-      });
+      // HLS を自前で解析した場合は yt-dlp を通さず ffmpeg で直接取得する
+      const result =
+        job.source === 'hls' ? await this.runHls(job) : await this.runYtdlp(job);
       job.filePath = result.filePath;
       job.speed = null;
       job.eta = null;

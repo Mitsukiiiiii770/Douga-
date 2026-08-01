@@ -269,6 +269,9 @@ $('add-btn').addEventListener('click', () => {
     url: state.info.url,
     title: state.info.title,
     titleSource: state.info.titleSource || null,
+    // 'hls' なら ffmpeg 経路で取得する
+    source: state.info.source || null,
+    cookieHeader: state.info.cookieHeader || null,
     thumbnail: state.info.thumbnail,
     duration: state.info.duration,
     formats: state.info.formats,

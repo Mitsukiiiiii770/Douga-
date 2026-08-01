@@ -67,4 +67,41 @@ function clearAll() {
   } catch { /* 削除失敗は無視 */ }
 }
 
-module.exports = { write, remove, clearAll, toNetscape };
+/**
+ * 指定 URL に送るべき Cookie を選び、ヘッダ用の文字列にする。
+ * ffmpeg のように Netscape ファイルを読めない相手へ渡すときに使う。
+ */
+function headerFor(url, cookieList) {
+  if (!Array.isArray(cookieList) || cookieList.length === 0) return null;
+  let target;
+  try {
+    target = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = target.hostname;
+  const now = Date.now() / 1000;
+
+  const matched = cookieList.filter((cookie) => {
+    if (!cookie || !cookie.name) return false;
+    if (cookie.expirationDate && cookie.expirationDate < now) return false;
+    if (cookie.secure && target.protocol !== 'https:') return false;
+
+    const domain = String(cookie.domain || '').replace(/^\./, '');
+    if (!domain) return false;
+    const domainOk = cookie.hostOnly
+      ? host === domain
+      : host === domain || host.endsWith('.' + domain);
+    if (!domainOk) return false;
+
+    const cookiePath = cookie.path || '/';
+    return (
+      target.pathname === cookiePath ||
+      target.pathname.startsWith(cookiePath.replace(/\/$/, '') + '/')
+    );
+  });
+
+  return matched.length ? matched.map((c) => `${c.name}=${c.value}`).join('; ') : null;
+}
+
+module.exports = { write, remove, clearAll, toNetscape, headerFor };

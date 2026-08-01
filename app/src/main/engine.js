@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const binaries = require('./binaries');
 const settings = require('./settings');
+const hls = require('./hls');
 
 const PROGRESS_PREFIX = '@@DGPROG@@';
 const PROGRESS_TEMPLATE =
@@ -207,7 +208,30 @@ function friendlyError(lines) {
 }
 
 function normalizeFormats(info) {
-  const formats = Array.isArray(info.formats) ? info.formats : [];
+  let formats = Array.isArray(info.formats) ? info.formats : [];
+
+  // 拡張子の無いメディア URL などでは、yt-dlp が formats 配列を作らず
+  // トップレベルに url / ext だけを返すことがある。これを 1 件の形式として
+  // 扱わないと「形式が見つからない」と誤判定してしまう。
+  if (formats.length === 0 && info.url) {
+    formats = [
+      {
+        format_id: info.format_id || 'direct',
+        ext: info.ext || '',
+        url: info.url,
+        protocol: info.protocol || '',
+        width: info.width,
+        height: info.height,
+        fps: info.fps,
+        tbr: info.tbr,
+        vcodec: info.vcodec || 'unknown',
+        acodec: info.acodec || 'unknown',
+        filesize: info.filesize || info.filesize_approx,
+        format_note: info.format_note || ''
+      }
+    ];
+  }
+
   const out = [];
   for (const f of formats) {
     if (!f || !f.format_id) continue;
@@ -424,6 +448,40 @@ function manifestPreference(url) {
 }
 
 /**
+ * yt-dlp が扱えなかった URL を、HLS プレイリストとして読み直す。
+ * 中身が HLS でなければ null を返す（呼び出し側は次の候補へ進む）。
+ */
+async function probeAsHls(url, options = {}) {
+  let result;
+  try {
+    result = await hls.probe(url, options);
+  } catch (err) {
+    if (err && err.canceled) throw err;
+    return null;
+  }
+  if (!result || !result.formats.length) return null;
+
+  const info = {
+    kind: 'video',
+    source: 'hls',
+    url,
+    id: null,
+    title: url,
+    uploader: null,
+    duration: result.duration,
+    thumbnail: null,
+    isLive: false,
+    extractor: 'HLS',
+    formats: result.formats,
+    hasDrm: false
+  };
+  applyPageMeta(info, options.meta);
+  // ページ側の情報が無ければ URL 由来のままなので、その旨を残す
+  if (!info.titleSource) info.titleSource = 'url';
+  return info;
+}
+
+/**
  * 候補を順に解析し、最初に成功したものを返す。
  *
  * 「解析は通ったが形式が0件」も失敗として次へ進む。DRM で保護された
@@ -443,9 +501,24 @@ async function probeChain(target, candidates, options = {}) {
         applyPageMeta(info, options.meta);
         return { info, usedUrl: url, attempts };
       }
+
+      // yt-dlp が形式を出せなかった場合でも、中身が HLS なら自前で読める。
+      // 拡張子の無いトークン型 URL は yt-dlp が判別できないことがある
+      const viaHls = await probeAsHls(url, options);
+      if (viaHls) return { info: viaHls, usedUrl: url, attempts };
+
       attempts.push({ url, error: '再生できる形式が見つかりませんでした。' });
     } catch (err) {
       if (err && err.canceled) throw err;
+
+      // yt-dlp がエラーで終わった場合も、HLS として読めるなら救える
+      try {
+        const viaHls = await probeAsHls(url, options);
+        if (viaHls) return { info: viaHls, usedUrl: url, attempts };
+      } catch (hlsErr) {
+        if (hlsErr && hlsErr.canceled) throw hlsErr;
+      }
+
       attempts.push({ url, error: err ? err.message : String(err) });
     }
   }
