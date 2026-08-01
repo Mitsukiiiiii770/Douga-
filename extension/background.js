@@ -78,6 +78,14 @@ function updateBadge(tabId) {
   chrome.action.setBadgeBackgroundColor({ tabId, color: '#4f8cff' }).catch(() => {});
 }
 
+/**
+ * 拡張子を持たない配信エンドポイント。
+ * 例: /hls/2572/<トークン>
+ * 拡張子が無くてもマニフェストとして扱わないと、単なるファイル扱いになり
+ * 画質を選べる候補より後回しになってしまう。
+ */
+const STREAM_PATH_RE = /\/(hls|dash|manifest|playlist|master|stream)\//i;
+
 function classify(url, mime) {
   if (MANIFEST_RE.test(url)) return /\.mpd(\?|$)/i.test(url) ? 'dash' : 'hls';
   if (/dash\+xml/i.test(mime || '')) return 'dash';
@@ -85,6 +93,11 @@ function classify(url, mime) {
   if (MEDIA_FILE_RE.test(url)) return 'file';
   if (/^audio\//i.test(mime || '')) return 'audio';
   if (/^video\//i.test(mime || '')) return 'file';
+
+  // 拡張子も Content-Type もあてにならない場合、パスの形から推測する
+  try {
+    if (STREAM_PATH_RE.test(new URL(url).pathname)) return 'hls';
+  } catch { /* 壊れた URL は判定しない */ }
   return null;
 }
 

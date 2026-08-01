@@ -32,9 +32,29 @@
   /** 走査対象にする本文の上限。これを超えるものは JSON ではないとみなす */
   const MAX_SCAN_BYTES = 3 * 1024 * 1024;
 
-  /** JSON 内に現れる動画 URL。エスケープされた \/ も考慮する */
-  const MEDIA_URL_RE =
-    /https?:(?:\\?\/){2}[^\s"'<>\\]+?\.(?:m3u8|mpd|mp4|webm|mkv|mov|m4v|flv|ts|m4a|mp3)(?:\?[^\s"'<>\\]*)?/gi;
+  /**
+   * JSON 内に現れる動画 URL。エスケープされた \/ も考慮する。
+   *
+   * 拡張子を持つものと持たないものの両方を見る。
+   * 配信 URL がトークンだけで拡張子を持たない作りは珍しくなく
+   * （例: /hls/2572/<長いトークン>）、拡張子だけを頼りにすると
+   * そういうサイトを丸ごと取りこぼす。
+   */
+  // パスを構成する 1 文字。JSON 内では / が \/ と書かれるため、
+  // これを 1 単位として扱わないとパスの途中で切れてしまう
+  const P = '(?:[^\\s"\'<>\\\\]|\\\\/)';
+
+  const MEDIA_URL_PATTERNS = [
+    new RegExp(
+      `https?:(?:\\\\?/){2}${P}+?\\.(?:m3u8|mpd|mp4|webm|mkv|mov|m4v|flv|ts|m4a|mp3)(?:\\?${P}*)?`,
+      'gi'
+    ),
+    // 拡張子は無いが、パスが配信用だと分かるもの
+    new RegExp(
+      `https?:(?:\\\\?/){2}${P}*?\\\\?/(?:hls|dash|manifest|playlist|master|stream)\\\\?/${P}+`,
+      'gi'
+    )
+  ];
 
   /** 本文が文字列として読めそうな Content-Type か */
   function isScannable(contentType) {
@@ -64,8 +84,12 @@
   function scan(text) {
     if (typeof text !== 'string' || text.length === 0) return;
     if (text.length > MAX_SCAN_BYTES) return;
-    const found = text.match(MEDIA_URL_RE);
-    if (found) report(found);
+    const found = [];
+    for (const pattern of MEDIA_URL_PATTERNS) {
+      const matches = text.match(pattern);
+      if (matches) found.push(...matches);
+    }
+    if (found.length) report(found);
   }
 
   /* ---------------- fetch ---------------- */
