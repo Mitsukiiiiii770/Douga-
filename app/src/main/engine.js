@@ -523,17 +523,27 @@ async function probeChain(target, candidates, options = {}) {
     }
   }
 
-  const error = new EngineError(summarizeAttempts(attempts));
+  // 広告など降格された URL しか無かった場合は、検出そのものが
+  // 足りていない可能性が高い。案内の文面を変えるために伝える
+  const hadUsableCandidates = (candidates || []).some((c) => c && c.url && !c.noise);
+  const error = new EngineError(summarizeAttempts(attempts, { hadUsableCandidates }));
   error.attempts = attempts;
   throw error;
 }
 
 /** 全部失敗したときに、一番役に立つ一文を選ぶ */
-function summarizeAttempts(attempts) {
+function summarizeAttempts(attempts, { hadUsableCandidates = true } = {}) {
   const messages = attempts.map((a) => a.error);
   // ログインや DRM のように、対処が具体的なものを優先して見せる
   const actionable = messages.find((m) => /ログイン|DRM|拒否/.test(m));
   if (actionable) return actionable;
+
+  // ページ自体を解析できず、まともな候補も1つも無かった場合。
+  // 「拡張機能から送ってください」と案内しても既に送っているので意味がない。
+  // 本当に必要な操作（動画を再生してから送り直す）を伝える
+  if (!hadUsableCandidates && messages.some((m) => /直接解析できませんでした/.test(m))) {
+    return 'このサイトはページからは解析できませんでした。動画を一度再生してから、もう一度拡張機能で送ってください（再生を始めないと配信 URL が現れないサイトがあります）。';
+  }
   if (attempts.length > 1) {
     return `${attempts.length} 件の URL を試しましたが取得できませんでした。最後のエラー: ${
       messages[messages.length - 1]
@@ -713,6 +723,7 @@ module.exports = {
   isDerivedTitle,
   applyPageMeta,
   manifestPreference,
+  summarizeAttempts,
   outputTemplateFor,
   sanitizeFileName,
   download,
