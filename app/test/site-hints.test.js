@@ -43,6 +43,57 @@ function fakeTweetVideo(statusHrefs) {
   );
   check('壊れた URL でも例外を投げない', hints.normalizePageUrl('not a url') === 'not a url');
 
+  group('短い名前のクエリは、そのサイトで計測用と分かっている場合だけ消す');
+  check(
+    '?s= は一般のサイトでは残す（検索語やセッション ID のことが多い）',
+    hints.normalizePageUrl('https://www.xnxx.com/video-abc/title?s=1') ===
+      'https://www.xnxx.com/video-abc/title?s=1',
+    hints.normalizePageUrl('https://www.xnxx.com/video-abc/title?s=1')
+  );
+  check(
+    '?s= は X では消す（共有時に付く計測用）',
+    hints.normalizePageUrl('https://x.com/a/status/123?s=20') === 'https://x.com/a/status/123',
+    hints.normalizePageUrl('https://x.com/a/status/123?s=20')
+  );
+  check(
+    '?si= は一般のサイトでは残す',
+    hints.normalizePageUrl('https://example.com/v?si=abc') === 'https://example.com/v?si=abc'
+  );
+  check(
+    '?si= は YouTube では消す',
+    hints.normalizePageUrl('https://youtu.be/abc123?si=xyz') === 'https://youtu.be/abc123'
+  );
+  check(
+    '?pp= は一般のサイトでは残す',
+    hints.normalizePageUrl('https://example.com/v?pp=1') === 'https://example.com/v?pp=1'
+  );
+
+  group('アダルト動画サイト（yt-dlp の専用エクストラクタに任せる）');
+  check(
+    'xnxx の動画 URL をそのまま通す',
+    hints.normalizePageUrl('https://www.xnxx.com/video-1a2b3c/some_title') ===
+      'https://www.xnxx.com/video-1a2b3c/some_title',
+    hints.normalizePageUrl('https://www.xnxx.com/video-1a2b3c/some_title')
+  );
+  check(
+    'xnxx でも計測用クエリだけは落とす',
+    hints.normalizePageUrl('https://www.xnxx.com/video-1a2b3c/t?utm_source=x&fbclid=y') ===
+      'https://www.xnxx.com/video-1a2b3c/t',
+    hints.normalizePageUrl('https://www.xnxx.com/video-1a2b3c/t?utm_source=x&fbclid=y')
+  );
+  check(
+    'xnxx の配信 CDN は降格しない',
+    hints.isNoise('https://cdn77-vid.xnxx-cdn.com/video.mp4') === false
+  );
+  for (const ad of [
+    'https://s.exosrv.com/ad.mp4',
+    'https://a.realsrv.com/x.mp4',
+    'https://cdn.tsyndicate.com/x.mp4',
+    'https://x.hilltopads.net/a.mp4'
+  ]) {
+    check(`広告配信 ${hints.hostOf(ad)} は降格`, hints.isNoise(ad) === true, ad);
+  }
+
   group('ページ URL の正規化（汎用処理では直せない例外）');
   check(
     '再生リスト付き URL は開いている1本に絞る',
