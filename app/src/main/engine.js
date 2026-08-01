@@ -381,7 +381,10 @@ function orderTargets(target, candidates = []) {
   const usable = candidates.filter((c) => c && c.url && !c.noise);
   const rank = { hls: 0, dash: 0, file: 1, audio: 2 };
   const ordered = [...usable].sort(
-    (a, b) => (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3) || (b.size || 0) - (a.size || 0)
+    (a, b) =>
+      (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3) ||
+      manifestPreference(a.url) - manifestPreference(b.url) ||
+      (b.size || 0) - (a.size || 0)
   );
   for (const candidate of ordered) push(candidate.url);
 
@@ -390,6 +393,34 @@ function orderTargets(target, candidates = []) {
     if (candidate && candidate.noise) push(candidate.url);
   }
   return urls;
+}
+
+/**
+ * 同じサイトから複数のマニフェストが見つかったときの優先度。
+ *
+ * HLS では「master プレイリスト」が画質ごとの variant を束ねている。
+ * master を渡せば画質を選べるが、variant を直接渡すとその画質に固定される。
+ * 名前からしか判別できないので、確実なものだけを上に置く。
+ *
+ * 小さいほど優先。
+ */
+function manifestPreference(url) {
+  let name = '';
+  try {
+    name = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '');
+  } catch {
+    return 1;
+  }
+  if (/master|^main\b/i.test(name)) return 0;
+
+  // 解像度やビットレートが名前に入っているものは特定画質の variant。
+  // 区切りが _ のことが多く、_ は単語構成文字なので \b は使えない。
+  // 長い数字の一部を拾わないよう、前後を数字以外に限定する。
+  const isVariant =
+    /(?<!\d)\d{3,4}p(?!\d)/i.test(name) ||
+    /(?<!\d)\d{3,4}x\d{3,4}(?!\d)/i.test(name) ||
+    /(?<!\d)\d{3,5}k(?![0-9a-z])/i.test(name);
+  return isVariant ? 2 : 1;
 }
 
 /**
@@ -608,6 +639,7 @@ module.exports = {
   orderTargets,
   isDerivedTitle,
   applyPageMeta,
+  manifestPreference,
   outputTemplateFor,
   sanitizeFileName,
   download,
