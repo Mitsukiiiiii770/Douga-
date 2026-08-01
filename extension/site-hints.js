@@ -83,8 +83,19 @@
     /(^|\.)popads\.net$/i,
     /(^|\.)tsyndicate\.com$/i,
     /(^|\.)adsterra\.com$/i,
-    /(^|\.)hilltopads\.net$/i
+    /(^|\.)hilltopads\.net$/i,
+    // 動画広告を mp4 で配信するため、そのまま候補に紛れ込む
+    /(^|\.)adtng\.com$/i,
+    /(^|\.)adsco\.re$/i,
+    /(^|\.)pubadx\.one$/i,
+    /(^|\.)creativecdn\.com$/i
   ];
+
+  /**
+   * ドメイン名だけでは拾いきれない広告配信。
+   * 広告 CDN は creatives / banners のようなパスを使うことが多い。
+   */
+  const NOISE_PATHS = [/\/creatives?\//i, /\/banners?\//i, /\/adserver\//i, /\/vast\//i];
 
   /**
    * ページ URL を、動画1本を指す形に整える。
@@ -147,7 +158,15 @@
   function isNoise(url) {
     const host = hostOf(url);
     if (!host) return false;
-    return NOISE_HOSTS.some((pattern) => pattern.test(host));
+    if (NOISE_HOSTS.some((pattern) => pattern.test(host))) return true;
+
+    let pathname = '';
+    try {
+      pathname = new URL(url).pathname;
+    } catch {
+      return false;
+    }
+    return NOISE_PATHS.some((pattern) => pattern.test(pathname));
   }
 
   root.DougaSiteHints = {

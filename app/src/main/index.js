@@ -195,6 +195,10 @@ ipcMain.handle(
         signal: controller.signal
       });
       // 後続のダウンロードでも同じ Cookie を使えるようにパスを返す
+      // HLS を ffmpeg で取る場合、Cookie はファイルではなくヘッダで渡す
+      if (info && info.source === 'hls') {
+        info.cookieHeader = cookies.headerFor(usedUrl, cookieList);
+      }
       return { ok: true, info, cookieFile, usedUrl, attempts };
     } catch (err) {
       cookies.remove(cookieFile);
