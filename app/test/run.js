@@ -15,6 +15,7 @@ const suites = [
   'postprocess.test.js',
   'site-hints.test.js',
   'fallback.test.js',
+  'manifest-order.test.js',
   'bridge.test.js',
   'queue.test.js',
   'persistence.test.js'

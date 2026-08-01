@@ -84,6 +84,34 @@ function report() {
     .catch(() => { /* service worker 停止中などは次回に任せる */ });
 }
 
+/**
+ * net-hook.js（ページと同じ世界で動く）が見つけた URL を受け取る。
+ *
+ * postMessage はページからも投げられるため、素性を確かめる:
+ *   - このウィンドウ自身から来たものに限る
+ *   - 文字列の配列であることと、http(s) であることを確認する
+ * ここで通した URL は「候補」に並ぶだけで、実際に取得するかは
+ * ユーザーが選ぶので、多少の紛れ込みがあっても実害はない。
+ */
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== 'douga:media-urls' || !Array.isArray(data.urls)) return;
+
+  const urls = data.urls
+    .filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url))
+    .slice(0, 30);
+  if (!urls.length) return;
+
+  chrome.runtime
+    .sendMessage({
+      type: 'video-elements',
+      sources: urls.map((src) => ({ src, origin: 'network' })),
+      meta: pageMeta ? pageMeta.extract(primaryMedia([...document.querySelectorAll('video')])) : null
+    })
+    .catch(() => { /* service worker 停止中などは次回に任せる */ });
+});
+
 report();
 
 const observer = new MutationObserver(() => report());
