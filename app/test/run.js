@@ -18,6 +18,7 @@ const suites = [
   'manifest-order.test.js',
   'hls.test.js',
   'stream-detect.test.js',
+  'detect.test.js',
   'bridge.test.js',
   'queue.test.js',
   'persistence.test.js'

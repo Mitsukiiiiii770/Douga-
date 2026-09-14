@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; font-src 'self';"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; font-src 'self'; frame-src https: about:;"
     />
     <title>Douga</title>
     <link rel="stylesheet" href="style.css" />
@@ -17,6 +17,7 @@
       </div>
       <nav class="tabs" id="tabs">
         <button class="tab is-active" data-tab="download">ダウンロード</button>
+        <button class="tab" data-tab="browse">ブラウザ</button>
         <button class="tab" data-tab="queue">
           キュー<span class="badge" id="queue-badge" hidden>0</span>
         </button>
@@ -115,6 +116,29 @@
           <h3>拡張機能が検出した動画</h3>
           <p class="muted" id="captured-page"></p>
           <ul class="candidate-list" id="candidate-list"></ul>
+        </div>
+      </section>
+
+      <!-- ブラウザタブ: 拡張機能なしで動画を見つけるための内蔵ブラウザ -->
+      <section class="panel" data-panel="browse">
+        <div class="browse-bar">
+          <button id="browse-back" class="ghost small" title="戻る">←</button>
+          <button id="browse-forward" class="ghost small" title="進む">→</button>
+          <button id="browse-reload" class="ghost small" title="再読み込み">⟳</button>
+          <input
+            id="browse-url"
+            type="text"
+            placeholder="動画ページの URL を入力（サイト内で検索・ログインもできます）"
+            spellcheck="false"
+          />
+          <button id="browse-go" class="ghost small">移動</button>
+          <button id="browse-capture" class="primary">この動画を取り込む</button>
+        </div>
+        <p class="hint" id="browse-status">
+          ここで動画を再生すると、配信 URL を自動で見つけます。ログインが必要なサイトは、この中でログインしてください。
+        </p>
+        <div class="browse-view">
+          <webview id="browse-view" src="about:blank" allowpopups></webview>
         </div>
       </section>
 

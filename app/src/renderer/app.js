@@ -695,6 +695,7 @@ api.bridge.onPaired(async () => {
 /* ---------------- 起動 ---------------- */
 
 (async function init() {
+  await initBrowse();
   await loadPostPresets();
   await loadSettings();
   await refreshBinaries();
@@ -705,3 +706,128 @@ api.bridge.onPaired(async () => {
   }
   refreshQueueBadge();
 })();
+
+/* ---------------- 内蔵ブラウザ ---------------- */
+
+/**
+ * 拡張機能を入れずに動画を見つけるための経路。
+ *
+ * Electron は Chromium なので、アプリの中にブラウザを持てば
+ * 配信 URL の盗聴・Cookie の取得・ページ情報の読み取りが自前でできる。
+ * ここでログインした情報は、普段使いのブラウザとは別に保存される。
+ */
+const browseState = { candidates: [], pageUrl: '', metaScript: null };
+
+function browseView() {
+  return $('browse-view');
+}
+
+async function initBrowse() {
+  const view = browseView();
+  // 盗聴用の session と同じ区画を使う。ログイン状態もここに残る
+  view.partition = await api.browse.partition();
+  browseState.metaScript = await api.browse.metaScript();
+
+  const syncUrl = () => {
+    const url = view.getURL();
+    if (url && url !== 'about:blank') $('browse-url').value = url;
+  };
+
+  // ページが変わったら前のページの候補を捨てる
+  view.addEventListener('did-start-navigation', (event) => {
+    if (event.isMainFrame) {
+      api.browse.reset(event.url);
+      browseState.candidates = [];
+      renderBrowseStatus();
+    }
+  });
+
+  view.addEventListener('did-navigate', syncUrl);
+  view.addEventListener('did-navigate-in-page', syncUrl);
+  view.addEventListener('page-title-updated', (event) => {
+    api.browse.setPage({ url: view.getURL(), title: event.title });
+  });
+
+  // 候補は随時増えるので、定期的に取り直す
+  setInterval(async () => {
+    if (!document.querySelector('.panel[data-panel="browse"]').classList.contains('is-active')) {
+      return;
+    }
+    const state = await api.browse.state();
+    browseState.candidates = state.candidates || [];
+    browseState.pageUrl = state.pageUrl || view.getURL();
+    renderBrowseStatus();
+  }, 1000);
+}
+
+function renderBrowseStatus() {
+  const usable = browseState.candidates.filter((c) => !c.noise).length;
+  const status = $('browse-status');
+  if (usable > 0) {
+    status.textContent = `動画を ${usable} 件見つけました。「この動画を取り込む」を押すとダウンロードへ進みます。`;
+    status.classList.add('is-ready');
+  } else {
+    status.textContent =
+      'ここで動画を再生すると、配信 URL を自動で見つけます。ログインが必要なサイトは、この中でログインしてください。';
+    status.classList.remove('is-ready');
+  }
+}
+
+function navigateBrowse(input) {
+  const raw = (input || '').trim();
+  if (!raw) return;
+  // URL に見えなければ検索として扱う
+  const target = /^https?:\/\//i.test(raw)
+    ? raw
+    : /^[\w-]+(\.[\w-]+)+/.test(raw)
+      ? `https://${raw}`
+      : `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`;
+  browseView().loadURL(target);
+}
+
+$('browse-go').addEventListener('click', () => navigateBrowse($('browse-url').value));
+$('browse-url').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') navigateBrowse($('browse-url').value);
+});
+$('browse-back').addEventListener('click', () => {
+  const view = browseView();
+  if (view.canGoBack()) view.goBack();
+});
+$('browse-forward').addEventListener('click', () => {
+  const view = browseView();
+  if (view.canGoForward()) view.goForward();
+});
+$('browse-reload').addEventListener('click', () => browseView().reload());
+
+$('browse-capture').addEventListener('click', async () => {
+  const button = $('browse-capture');
+  button.disabled = true;
+  button.textContent = '取り込み中…';
+  try {
+    const view = browseView();
+    const pageUrl = view.getURL();
+
+    // ページから読み取れるタイトル・サムネ・尺。保存名に使う
+    let meta = null;
+    try {
+      meta = await view.executeJavaScript(browseState.metaScript);
+    } catch {
+      /* 読めなくても候補だけで進める */
+    }
+
+    const state = await api.browse.state();
+    const candidates = state.candidates || [];
+    const cookies = await api.browse.cookies([pageUrl, ...candidates.map((c) => c.url)]);
+
+    showTab('download');
+    await probe(pageUrl, {
+      headers: { referer: pageUrl, userAgent: navigator.userAgent },
+      cookies,
+      candidates,
+      meta
+    });
+  } finally {
+    button.disabled = false;
+    button.textContent = 'この動画を取り込む';
+  }
+});

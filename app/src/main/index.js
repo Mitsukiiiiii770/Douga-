@@ -10,6 +10,8 @@ const queue = require('./queue');
 const bridge = require('./bridge');
 const cookies = require('./cookies');
 const postprocess = require('./postprocess');
+const browse = require('./browse');
+const pageMetaScript = require('../shared/page-meta-script');
 
 let mainWindow = null;
 /** 解析中のリクエストを id で中断できるようにする */
@@ -31,7 +33,9 @@ function createWindow() {
       preload: path.join(__dirname, '..', 'preload', 'index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // アプリ内ブラウザ用。拡張機能なしで配信 URL を拾うために必要
+      webviewTag: true
     }
   });
 
@@ -162,6 +166,20 @@ ipcMain.handle('bridge:regenerateToken', async () => {
   return bridge.status();
 });
 
+ipcMain.handle('browse:partition', () => browse.partition());
+ipcMain.handle('browse:metaScript', () => pageMetaScript.SOURCE);
+ipcMain.handle('browse:state', () => browse.state());
+ipcMain.handle('browse:reset', (_event, url) => {
+  browse.reset(url || '');
+  return browse.state();
+});
+ipcMain.handle('browse:setPage', (_event, { url, title }) => {
+  browse.setPage(url, title);
+  return browse.state();
+});
+ipcMain.handle('browse:cookies', (_event, urls) => browse.cookiesFor(urls || []));
+ipcMain.handle('browse:clearData', () => browse.clearData());
+
 ipcMain.handle('binaries:status', () => binaries.status());
 
 ipcMain.handle('postprocess:presets', () => postprocess.presetList());
@@ -253,6 +271,8 @@ ipcMain.handle('shell:openExternal', async (_event, url) => {
 
 app.whenReady().then(async () => {
   cookies.clearAll();
+  // アプリ内ブラウザの監視を始める（拡張機能なしで動かすための経路）
+  browse.attach();
   // 前回のキューを読み込む（実行中だったものは「中断」になる）
   queue.restore();
   createWindow();
