@@ -116,8 +116,13 @@ function shouldRecord({ url, mime, size, isMedia }) {
   if (!isMedia && !MEDIA_MIME_RE.test(mime || '') && !MANIFEST_RE.test(url) && !MEDIA_FILE_RE.test(url)) {
     return null;
   }
-  // ごく小さいレスポンスはスプライトやプレビュー、広告ビーコンのことが多い
-  if (kind === 'file' && !isMedia && size !== null && size !== undefined && size < MIN_FILE_SIZE) {
+  // 大きさが分かっているなら、小さすぎるものは常に捨てる。
+  // マニフェストは中身が目録なので小さくて当然だが、実体ファイルが数 KB
+  // ということはない。UI の効果音（YouTube は <audio> で先読みする）や
+  // スプライト、広告ビーコンがここで落ちる。
+  // 「メディア要素が出したリクエストだから」という理由だけでは通せない。
+  const isManifest = kind === 'hls' || kind === 'dash';
+  if (!isManifest && size !== null && size !== undefined && size < MIN_FILE_SIZE) {
     return null;
   }
   return kind;

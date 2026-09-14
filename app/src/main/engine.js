@@ -194,6 +194,14 @@ function friendlyError(lines) {
   if (/HTTP Error 40[34]/i.test(text)) {
     return 'サーバーにアクセスを拒否されました（403/404）。Referer や Cookie が必要な可能性があります。';
   }
+  // YouTube は仕様変更が多く、yt-dlp が古いとここで止まる。
+  // 実際にこの2つのメッセージで解析できなくなる事例が出た
+  if (/Requested format is not available/i.test(text)) {
+    return 'yt-dlp がこの動画の形式を取得できませんでした。設定タブで yt-dlp を「自動インストール」し直して最新版にしてください（YouTube は仕様変更が多く、更新で直ることがほとんどです）。';
+  }
+  if (/youtubetab|Playlists that require authentication/i.test(text)) {
+    return 'YouTube のページとして解析しようとして失敗しました。動画ページの URL（watch?v=... の形）を指定してください。';
+  }
   if (/Unsupported URL/i.test(text)) {
     return 'このページは直接解析できませんでした。ブラウザ拡張機能から送ると、ページ内のストリームを自動で試します。';
   }

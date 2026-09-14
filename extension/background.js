@@ -200,8 +200,11 @@ chrome.webRequest.onHeadersReceived.addListener(
     ) {
       return;
     }
-    // ごく小さいレスポンスはスプライトやプレビュー、広告ビーコンのことが多い
-    if (kind === 'file' && !isMediaRequest && size !== null && size < MIN_FILE_SIZE) return;
+    // 大きさが分かっているなら、小さすぎるものは常に捨てる。
+    // UI の効果音（YouTube は <audio> で先読みする）やスプライトがここで落ちる。
+    // メディア要素が出したリクエストでも、数 KB なら動画ではない。
+    const isManifest = kind === 'hls' || kind === 'dash';
+    if (!isManifest && size !== null && size < MIN_FILE_SIZE) return;
 
     record(details.tabId, url, kind, { size });
   },
