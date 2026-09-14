@@ -32,6 +32,16 @@ contextBridge.exposeInMainWorld('douga', {
     install: (which) => ipcRenderer.invoke('binaries:install', which),
     onProgress: listen('binaries:progress')
   },
+  browse: {
+    partition: () => ipcRenderer.invoke('browse:partition'),
+    metaScript: () => ipcRenderer.invoke('browse:metaScript'),
+    state: () => ipcRenderer.invoke('browse:state'),
+    reset: (url) => ipcRenderer.invoke('browse:reset', url),
+    setPage: (info) => ipcRenderer.invoke('browse:setPage', info),
+    cookies: (urls) => ipcRenderer.invoke('browse:cookies', urls),
+    clearData: () => ipcRenderer.invoke('browse:clearData'),
+    onUpdate: listen('browse:update')
+  },
   postprocess: {
     presets: () => ipcRenderer.invoke('postprocess:presets')
   },

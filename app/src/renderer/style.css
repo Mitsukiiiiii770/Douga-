@@ -545,3 +545,51 @@ input[type="number"] {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ---------- 内蔵ブラウザ ---------- */
+
+/* このパネルだけは縦いっぱいに使う */
+.panel[data-panel='browse'] {
+  display: none;
+  flex-direction: column;
+  padding: 12px;
+}
+
+.panel[data-panel='browse'].is-active {
+  display: flex;
+}
+
+.browse-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.browse-bar input {
+  flex: 1;
+}
+
+.browse-view {
+  flex: 1;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  min-height: 0;
+}
+
+.browse-view webview {
+  width: 100%;
+  height: 100%;
+  display: flex;
+}
+
+#browse-status {
+  flex-shrink: 0;
+}
+
+#browse-status.is-ready {
+  color: var(--ok);
+}
