@@ -103,29 +103,44 @@ function isSegment(url) {
 }
 
 /**
- * 候補として採用するか。
+ * 候補として採用するかを、理由つきで返す。
+ *
+ * 「なぜ拾えなかったか」が分からないと、実機でしか再現しない取りこぼしを
+ * 追えない。実際に YouTube の UI 効果音や拡張子の無い配信 URL で
+ * 何度も当てずっぽうの修正を重ねたので、判断の記録を残せるようにした。
+ *
  * isMedia は「メディア要素が出したリクエストか」（Electron / Chrome が教えてくれる）。
+ *
+ * @returns {{kind: string|null, reason: string}}
  */
-function shouldRecord({ url, mime, size, isMedia }) {
-  if (!url || url.startsWith('blob:') || url.startsWith('data:')) return null;
-  if (isSegment(url)) return null;
+function explain({ url, mime, size, isMedia }) {
+  if (!url) return { kind: null, reason: 'URL が空' };
+  if (url.startsWith('blob:')) return { kind: null, reason: 'blob: は取得できない' };
+  if (url.startsWith('data:')) return { kind: null, reason: 'data: は対象外' };
+  if (isSegment(url)) return { kind: null, reason: 'セグメント（マニフェストがあれば足りる）' };
 
   const kind = classify(url, mime) || (isMedia ? 'file' : null);
-  if (!kind) return null;
+  if (!kind) return { kind: null, reason: '動画と判定できる手がかりが無い' };
 
   if (!isMedia && !MEDIA_MIME_RE.test(mime || '') && !MANIFEST_RE.test(url) && !MEDIA_FILE_RE.test(url)) {
-    return null;
+    return { kind: null, reason: 'メディア要素の読み込みではなく、拡張子も Content-Type も動画ではない' };
   }
+
   // 大きさが分かっているなら、小さすぎるものは常に捨てる。
   // マニフェストは中身が目録なので小さくて当然だが、実体ファイルが数 KB
   // ということはない。UI の効果音（YouTube は <audio> で先読みする）や
   // スプライト、広告ビーコンがここで落ちる。
-  // 「メディア要素が出したリクエストだから」という理由だけでは通せない。
   const isManifest = kind === 'hls' || kind === 'dash';
   if (!isManifest && size !== null && size !== undefined && size < MIN_FILE_SIZE) {
-    return null;
+    return { kind: null, reason: `小さすぎる（${formatBytes(size)} < ${formatBytes(MIN_FILE_SIZE)}）` };
   }
-  return kind;
+
+  return { kind, reason: isNoise(url) ? '採用（ただし広告・計測として降格）' : '採用' };
+}
+
+/** 採用する場合だけ種別を返す。理由が要るときは explain() を使う */
+function shouldRecord(input) {
+  return explain(input).kind;
 }
 
 function formatBytes(bytes) {
@@ -157,6 +172,7 @@ module.exports = {
   isNoise,
   isSegment,
   shouldRecord,
+  explain,
   labelFor,
   formatBytes,
   hostOf,

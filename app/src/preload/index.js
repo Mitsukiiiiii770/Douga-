@@ -42,6 +42,12 @@ contextBridge.exposeInMainWorld('douga', {
     clearData: () => ipcRenderer.invoke('browse:clearData'),
     onUpdate: listen('browse:update')
   },
+  diagnostics: {
+    // 観測した通信と判断の理由を書き出す
+    export: () => ipcRenderer.invoke('diagnostics:export'),
+    preview: () => ipcRenderer.invoke('diagnostics:preview'),
+    reset: () => ipcRenderer.invoke('diagnostics:reset')
+  },
   postprocess: {
     presets: () => ipcRenderer.invoke('postprocess:presets')
   },

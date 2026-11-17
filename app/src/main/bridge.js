@@ -189,6 +189,22 @@ class Bridge extends EventEmitter {
                 noise: !!c.noise
               }))
           : [],
+        // 検出ログ用。拡張機能が拾わなかった URL とその理由
+        rejected: Array.isArray(body.rejected)
+          ? body.rejected
+              .filter((r) => r && typeof r.url === 'string')
+              .slice(0, 100)
+              .map((r) => ({
+                url: r.url.slice(0, 400),
+                reason: typeof r.reason === 'string' ? r.reason.slice(0, 200) : '',
+                mime: typeof r.mime === 'string' ? r.mime.slice(0, 100) : '',
+                size: Number.isFinite(r.size) ? r.size : null,
+                resourceType: typeof r.resourceType === 'string' ? r.resourceType.slice(0, 40) : ''
+              }))
+          : [],
+        uninteresting: Number.isFinite(body.uninteresting) ? body.uninteresting : 0,
+        segments: Number.isFinite(body.segments) ? body.segments : 0,
+        usesMediaSource: !!body.usesMediaSource,
         receivedAt: Date.now()
       };
       if (!capture.target && !capture.pageUrl) {

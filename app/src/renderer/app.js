@@ -831,3 +831,61 @@ $('browse-capture').addEventListener('click', async () => {
     button.textContent = 'この動画を取り込む';
   }
 });
+
+/* ---------------- 検出ログ ---------------- */
+
+/**
+ * うまく取れないサイトを直すための記録。
+ *
+ * アプリの中で何が起きているかは、使っている本人しか見えない。
+ * 「どの URL を見つけて、どれをなぜ捨てたか」を書き出せれば、
+ * 推測ではなく実際の通信を元に原因を特定できる。
+ */
+function diagStatus(text, isError = false) {
+  const node = $('diag-status');
+  node.textContent = text;
+  node.hidden = !text;
+  node.classList.toggle('error', isError);
+}
+
+$('diag-export').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await api.diagnostics.export();
+    if (result.canceled) {
+      diagStatus('');
+    } else if (result.ok) {
+      diagStatus(`書き出しました: ${result.path}`);
+    } else {
+      diagStatus(result.error || '書き出せませんでした', true);
+    }
+  } catch (err) {
+    diagStatus(err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('diag-show').addEventListener('click', async (event) => {
+  const preview = $('diag-preview');
+  if (!preview.hidden) {
+    preview.hidden = true;
+    event.currentTarget.textContent = '内容を見る';
+    return;
+  }
+  try {
+    preview.textContent = await api.diagnostics.preview();
+    preview.hidden = false;
+    event.currentTarget.textContent = '閉じる';
+  } catch (err) {
+    diagStatus(err.message, true);
+  }
+});
+
+$('diag-reset').addEventListener('click', async () => {
+  await api.diagnostics.reset();
+  $('diag-preview').hidden = true;
+  $('diag-show').textContent = '内容を見る';
+  diagStatus('記録を消しました');
+});

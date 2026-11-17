@@ -19,6 +19,7 @@ const suites = [
   'hls.test.js',
   'stream-detect.test.js',
   'detect.test.js',
+  'diagnostics.test.js',
   'bridge.test.js',
   'queue.test.js',
   'persistence.test.js'

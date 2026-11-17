@@ -11,6 +11,7 @@ const bridge = require('./bridge');
 const cookies = require('./cookies');
 const postprocess = require('./postprocess');
 const browse = require('./browse');
+const diagnostics = require('./diagnostics');
 const pageMetaScript = require('../shared/page-meta-script');
 
 let mainWindow = null;
@@ -92,6 +93,7 @@ bridge.onPairRequest = async (origin, name) => {
 };
 
 bridge.on('capture', (capture) => {
+  diagnostics.capture({ ...capture, source: '拡張機能' });
   focusWindow();
   send('capture:incoming', capture);
 });
@@ -180,6 +182,48 @@ ipcMain.handle('browse:setPage', (_event, { url, title }) => {
 ipcMain.handle('browse:cookies', (_event, urls) => browse.cookiesFor(urls || []));
 ipcMain.handle('browse:clearData', () => browse.clearData());
 
+/* ---------------- 検出ログ ---------------- */
+
+/**
+ * 観測した通信と判断の理由をファイルに書き出す。
+ *
+ * 手元で再現できない取りこぼしを直すには、実際に何が流れていたかを
+ * 見る必要がある。推測で直すより、このファイルを 1 回見たほうが早い。
+ */
+ipcMain.handle('diagnostics:export', async () => {
+  const bin = await binaries.status();
+  const text = diagnostics.report(diagnostics.snapshot(), {
+    app: app.getVersion(),
+    electron: process.versions.electron,
+    platform: `${process.platform} ${process.arch}`,
+    ytdlp: (bin.ytdlp && bin.ytdlp.version) || (bin.ytdlp && bin.ytdlp.path) || '不明',
+    ffmpeg: (bin.ffmpeg && bin.ffmpeg.version) || (bin.ffmpeg && bin.ffmpeg.path) || '不明'
+  });
+
+  const now = new Date();
+  const two = (n) => String(n).padStart(2, '0');
+  const name =
+    `douga-検出ログ-${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}` +
+    `-${two(now.getHours())}${two(now.getMinutes())}.txt`;
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '検出ログを書き出す',
+    defaultPath: path.join(app.getPath('downloads'), name),
+    filters: [{ name: 'テキスト', extensions: ['txt'] }]
+  });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+
+  await require('fs').promises.writeFile(result.filePath, text, 'utf8');
+  return { ok: true, path: result.filePath, bytes: Buffer.byteLength(text, 'utf8') };
+});
+
+ipcMain.handle('diagnostics:preview', () => diagnostics.report());
+
+ipcMain.handle('diagnostics:reset', () => {
+  diagnostics.reset();
+  return true;
+});
+
 ipcMain.handle('binaries:status', () => binaries.status());
 
 ipcMain.handle('postprocess:presets', () => postprocess.presetList());
@@ -217,9 +261,22 @@ ipcMain.handle(
       if (info && info.source === 'hls') {
         info.cookieHeader = cookies.headerFor(usedUrl, cookieList);
       }
+      diagnostics.probe({
+        target: url,
+        ok: true,
+        attempts,
+        formats: info && Array.isArray(info.formats) ? info.formats.length : null,
+        title: (info && info.title) || ''
+      });
       return { ok: true, info, cookieFile, usedUrl, attempts };
     } catch (err) {
       cookies.remove(cookieFile);
+      diagnostics.probe({
+        target: url,
+        ok: false,
+        error: err.message,
+        attempts: err.attempts || []
+      });
       return {
         ok: false,
         error: err.message,
