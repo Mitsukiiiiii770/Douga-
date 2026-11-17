@@ -22,13 +22,29 @@ const MIN_FILE_SIZE = 50 * 1024;
 
 const MAX_PER_TAB = 60;
 
+/**
+ * 捨てた URL も覚えておく上限。
+ *
+ * 「なぜ拾えなかったか」が分からないと、手元で再現できない取りこぼしを
+ * 追えない。理由つきで控えておき、アプリ側の検出ログに送る。
+ */
+const MAX_REJECTED_PER_TAB = 80;
+
 /** @type {Map<number, {candidates: Map<string, object>, segments: number, headers: object, pageUrl: string, pageTitle: string}>} */
 const tabs = new Map();
 
 function stateFor(tabId) {
   let entry = tabs.get(tabId);
   if (!entry) {
-    entry = { candidates: new Map(), segments: 0, headers: {}, pageUrl: '', pageTitle: '' };
+    entry = {
+      candidates: new Map(),
+      rejected: new Map(),
+      segments: 0,
+      uninteresting: 0,
+      headers: {},
+      pageUrl: '',
+      pageTitle: ''
+    };
     tabs.set(tabId, entry);
   }
   return entry;
@@ -41,7 +57,9 @@ function persist(tabId) {
     .set({
       [`tab_${tabId}`]: {
         candidates: [...entry.candidates.values()],
+        rejected: [...entry.rejected.values()],
         segments: entry.segments,
+        uninteresting: entry.uninteresting,
         headers: entry.headers,
         pageUrl: entry.pageUrl,
         pageTitle: entry.pageTitle,
@@ -60,7 +78,9 @@ async function restore(tabId) {
   const entry = stateFor(tabId);
   if (saved) {
     for (const candidate of saved.candidates || []) entry.candidates.set(candidate.url, candidate);
+    for (const item of saved.rejected || []) entry.rejected.set(item.url, item);
     entry.segments = saved.segments || 0;
+    entry.uninteresting = saved.uninteresting || 0;
     entry.headers = saved.headers || {};
     entry.pageUrl = saved.pageUrl || '';
     entry.pageTitle = saved.pageTitle || '';
@@ -149,6 +169,25 @@ function record(tabId, url, kind, extra = {}) {
   updateBadge(tabId);
 }
 
+/**
+ * 候補にしなかった URL を、理由つきで控える。
+ * 理由の文言はアプリ側（shared/detect.js）と揃えてある。
+ */
+function reject(tabId, url, reason, info = {}) {
+  if (tabId < 0 || !url) return;
+  const entry = stateFor(tabId);
+  if (entry.rejected.has(url)) return;
+  if (entry.rejected.size >= MAX_REJECTED_PER_TAB) return;
+  entry.rejected.set(url, {
+    url: url.slice(0, 300),
+    reason,
+    mime: info.mime || '',
+    size: info.size === undefined ? null : info.size,
+    resourceType: info.resourceType || ''
+  });
+  persist(tabId);
+}
+
 /* ---------------- ネットワーク監視 ---------------- */
 
 chrome.webRequest.onSendHeaders.addListener(
@@ -183,28 +222,57 @@ chrome.webRequest.onHeadersReceived.addListener(
     if (SEGMENT_RE.test(url) && !MANIFEST_RE.test(url)) {
       const entry = stateFor(details.tabId);
       entry.segments++;
+      // 最初の数件だけ控える。マニフェストを取りこぼしたとき、
+      // セグメントの URL から置き場所が分かる
+      if (entry.segments <= 3) {
+        reject(details.tabId, url, 'セグメント（マニフェストがあれば足りる）', {
+          mime,
+          size,
+          resourceType: details.type
+        });
+      }
       return;
     }
 
     // Chrome は <video>/<audio> が出したリクエストを type:'media' で分類する。
     // 拡張子も Content-Type もあてにならないサイトでも、これは効く。
     const isMediaRequest = details.type === 'media';
+    const facts = { mime, size, resourceType: details.type };
 
     const kind = classify(url, mime) || (isMediaRequest ? 'file' : null);
-    if (!kind) return;
+    if (!kind) {
+      // 手がかりが全く無いもの（CSS・画像・API）は数だけ数える。
+      // 1 件ずつ控えるとログが埋まって、肝心の取りこぼしが読めなくなる
+      stateFor(details.tabId).uninteresting++;
+      return;
+    }
     if (
       !isMediaRequest &&
       !MEDIA_MIME_RE.test(mime) &&
       !MANIFEST_RE.test(url) &&
       !MEDIA_FILE_RE.test(url)
     ) {
+      reject(
+        details.tabId,
+        url,
+        'メディア要素の読み込みではなく、拡張子も Content-Type も動画ではない',
+        facts
+      );
       return;
     }
     // 大きさが分かっているなら、小さすぎるものは常に捨てる。
     // UI の効果音（YouTube は <audio> で先読みする）やスプライトがここで落ちる。
     // メディア要素が出したリクエストでも、数 KB なら動画ではない。
     const isManifest = kind === 'hls' || kind === 'dash';
-    if (!isManifest && size !== null && size < MIN_FILE_SIZE) return;
+    if (!isManifest && size !== null && size < MIN_FILE_SIZE) {
+      reject(
+        details.tabId,
+        url,
+        `小さすぎる（${formatBytes(size)} < ${formatBytes(MIN_FILE_SIZE)}）`,
+        facts
+      );
+      return;
+    }
 
     record(details.tabId, url, kind, { size });
   },
@@ -219,7 +287,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'loading' && changeInfo.url) {
     // ページ遷移で候補をリセット
     entry.candidates.clear();
+    entry.rejected.clear();
     entry.segments = 0;
+    entry.uninteresting = 0;
     entry.pageTarget = '';
     entry.usesMediaSource = false;
     entry.meta = null;
@@ -264,7 +334,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse({
         ok: true,
         candidates: [...entry.candidates.values()].sort((a, b) => rank(b) - rank(a)),
+        rejected: [...entry.rejected.values()],
         segments: entry.segments,
+        uninteresting: entry.uninteresting || 0,
         headers: entry.headers,
         usesMediaSource: !!entry.usesMediaSource,
         pageTarget: entry.pageTarget || '',
@@ -275,7 +347,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'clear-candidates') {
       const entry = stateFor(message.tabId);
       entry.candidates.clear();
+      entry.rejected.clear();
       entry.segments = 0;
+      entry.uninteresting = 0;
       persist(message.tabId);
       updateBadge(message.tabId);
       return sendResponse({ ok: true });

@@ -330,6 +330,22 @@
         </div>
 
         <div class="setting-group">
+          <h3>検出ログ（うまく取れないときに）</h3>
+          <p class="muted">
+            どの URL を見つけて、どれをなぜ使わなかったかを 1 つのファイルに書き出します。
+            取れなかったサイトで一度再生してから書き出してください。
+            Cookie やその値は含まれません。長い URL は途中で切っています。
+          </p>
+          <div class="row">
+            <button id="diag-export">検出ログを書き出す</button>
+            <button id="diag-show" class="ghost">内容を見る</button>
+            <button id="diag-reset" class="ghost">記録を消す</button>
+          </div>
+          <p class="notice" id="diag-status" hidden></p>
+          <pre class="log-preview" id="diag-preview" hidden></pre>
+        </div>
+
+        <div class="setting-group">
           <h3>注意</h3>
           <p class="muted">
             DRM（Widevine / PlayReady / FairPlay）で保護された動画には対応していません。

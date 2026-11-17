@@ -9,6 +9,9 @@ const hints = window.DougaSiteHints;
 let currentTab = null;
 let detection = {
   candidates: [],
+  // 検出ログ用。拾わなかった URL とその理由
+  rejected: [],
+  uninteresting: 0,
   headers: {},
   usesMediaSource: false,
   segments: 0,
@@ -211,7 +214,12 @@ async function sendToApp(target, button) {
       label: c.label,
       size: c.size || null,
       noise: !!c.noise
-    }))
+    })),
+    // 検出ログ用。アプリ側で「なぜ拾えなかったか」を書き出せるようにする
+    rejected: detection.rejected || [],
+    uninteresting: detection.uninteresting || 0,
+    segments: detection.segments || 0,
+    usesMediaSource: !!detection.usesMediaSource
   });
 
   if (button) {
@@ -238,6 +246,8 @@ async function loadDetection() {
   if (response && response.ok) {
     detection = {
       candidates: response.candidates || [],
+      rejected: response.rejected || [],
+      uninteresting: response.uninteresting || 0,
       headers: response.headers || {},
       usesMediaSource: !!response.usesMediaSource,
       segments: response.segments || 0,

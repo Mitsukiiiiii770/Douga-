@@ -3,6 +3,7 @@
 const { EventEmitter } = require('events');
 const { session } = require('electron');
 const detect = require('../shared/detect');
+const diagnostics = require('./diagnostics');
 
 /**
  * アプリ内ブラウザ。拡張機能なしで完結させるための仕組み。
@@ -73,6 +74,17 @@ class Browser extends EventEmitter {
     const url = details.url;
     if (detect.isSegment(url)) {
       this.segments++;
+      diagnostics.segment();
+      // 最初の数件だけは残す。マニフェストを取りこぼしたとき、
+      // セグメントの URL からどこに置かれているか分かる
+      if (this.segments <= 3) {
+        diagnostics.observe({
+          url,
+          resourceType: details.resourceType || '',
+          kind: null,
+          reason: 'セグメント（マニフェストがあれば足りる）'
+        });
+      }
       return;
     }
 
@@ -86,13 +98,22 @@ class Browser extends EventEmitter {
       if (key === 'content-length') size = Number(value) || null;
     }
 
-    const kind = detect.shouldRecord({
+    const { kind, reason } = detect.explain({
       url,
       mime,
       size,
       // Electron も Chrome と同じく <video> 由来のリクエストを 'media' と分類する
       isMedia: details.resourceType === 'media'
     });
+
+    // 手がかりが全く無いもの（CSS・画像・API）は数だけ数える。
+    // 1 件ずつ残すとログが埋まって、肝心の取りこぼしが読めなくなる
+    if (!kind && reason === '動画と判定できる手がかりが無い') {
+      diagnostics.skip();
+      return;
+    }
+
+    diagnostics.observe({ url, mime, size, resourceType: details.resourceType || '', kind, reason });
     if (!kind) return;
 
     this.record(url, kind, size);
