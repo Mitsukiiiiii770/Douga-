@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 
@@ -268,6 +269,40 @@ ipcMain.handle('update:restart', () => {
   app.relaunch();
   app.exit(0);
   return true;
+});
+
+/**
+ * デスクトップにショートカットを作る。
+ *
+ * ランチャー（Douga起動.bat）は npm 経由で起動するため、黒いコンソール窓が
+ * 残り続ける。Electron 本体は GUI アプリなので、直接起動すれば窓は出ない。
+ * その「直接起動する」ショートカットをここで作る。
+ */
+ipcMain.handle('shell:createShortcut', async () => {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'この機能は Windows 専用です' };
+  }
+  try {
+    const appDir = app.getAppPath();
+    const iconPath = path.join(appDir, 'build', 'icon.ico');
+    const target = path.join(app.getPath('desktop'), 'Douga.lnk');
+
+    const created = shell.writeShortcutLink(target, 'create', {
+      // 開発用に npm start で動かしている場合、execPath は electron 本体を指す。
+      // その場合だけアプリの場所を引数で渡す必要がある
+      target: process.execPath,
+      args: app.isPackaged ? '' : `"${appDir}"`,
+      cwd: appDir,
+      icon: fs.existsSync(iconPath) ? iconPath : process.execPath,
+      iconIndex: 0,
+      description: 'Douga - 動画抽出・ダウンローダー'
+    });
+
+    if (!created) return { ok: false, error: 'ショートカットを作成できませんでした' };
+    return { ok: true, path: target };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('update:version', () => ({

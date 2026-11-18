@@ -1053,3 +1053,30 @@ setTimeout(async () => {
     /* 確認できなくても使用には支障がない */
   }
 }, 3000);
+
+/* ---------------- 起動用ショートカット ---------------- */
+
+/**
+ * バッチファイルから起動すると、npm → node → electron という
+ * 流れになるためコンソール窓が残り続ける。Electron 本体を直接起動する
+ * ショートカットを作れば窓は出ない。
+ */
+$('make-shortcut').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  const status = $('shortcut-status');
+  button.disabled = true;
+  try {
+    const result = await api.update.createShortcut();
+    status.hidden = false;
+    status.classList.toggle('error', !result.ok);
+    status.textContent = result.ok
+      ? 'デスクトップに「Douga」を作りました。次からはこれで開けます（黒い窓は出ません）。'
+      : result.error;
+  } catch (err) {
+    status.hidden = false;
+    status.classList.add('error');
+    status.textContent = err.message;
+  } finally {
+    button.disabled = false;
+  }
+});
