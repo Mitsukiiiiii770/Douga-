@@ -48,6 +48,12 @@ contextBridge.exposeInMainWorld('douga', {
     preview: () => ipcRenderer.invoke('diagnostics:preview'),
     reset: () => ipcRenderer.invoke('diagnostics:reset')
   },
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    apply: () => ipcRenderer.invoke('update:apply'),
+    restart: () => ipcRenderer.invoke('update:restart'),
+    version: () => ipcRenderer.invoke('update:version')
+  },
   postprocess: {
     presets: () => ipcRenderer.invoke('postprocess:presets')
   },

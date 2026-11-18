@@ -12,6 +12,7 @@ const cookies = require('./cookies');
 const postprocess = require('./postprocess');
 const browse = require('./browse');
 const diagnostics = require('./diagnostics');
+const update = require('./update');
 const pageMetaScript = require('../shared/page-meta-script');
 
 let mainWindow = null;
@@ -218,6 +219,62 @@ ipcMain.handle('diagnostics:export', async () => {
 });
 
 ipcMain.handle('diagnostics:preview', () => diagnostics.report());
+
+/* ---------------- 自動更新 ---------------- */
+
+/**
+ * 確認のときに落としたソースを覚えておく。
+ * 更新を実行するときに、同じものをもう一度落とさずに済ませるため。
+ */
+let pendingUpdate = null;
+
+ipcMain.handle('update:check', async () => {
+  try {
+    const result = await update.check();
+    pendingUpdate = result.upToDate ? null : { version: result.latest, tree: result.tree };
+    return {
+      ok: true,
+      upToDate: result.upToDate,
+      current: result.current,
+      latest: { sha: result.latest.sha, message: result.latest.message, date: result.latest.date },
+      changes: result.changes
+        ? {
+            changed: result.changes.changed,
+            added: result.changes.added,
+            removed: result.changes.removed
+          }
+        : null,
+      depsChanged: !!result.depsChanged
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('update:apply', async () => {
+  try {
+    const tree = pendingUpdate ? pendingUpdate.tree : null;
+    const version = pendingUpdate ? pendingUpdate.version : null;
+    const result = await update.apply({ tree, version });
+    pendingUpdate = null;
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('update:restart', () => {
+  // 実行中のダウンロードがあれば、再開できる形で止めてから落とす
+  app.relaunch();
+  app.exit(0);
+  return true;
+});
+
+ipcMain.handle('update:version', () => ({
+  app: app.getVersion(),
+  commit: update.localCommit(),
+  branch: update.BRANCH
+}));
 
 ipcMain.handle('diagnostics:reset', () => {
   diagnostics.reset();

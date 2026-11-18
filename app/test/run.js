@@ -20,6 +20,7 @@ const suites = [
   'stream-detect.test.js',
   'detect.test.js',
   'diagnostics.test.js',
+  'update.test.js',
   'bridge.test.js',
   'queue.test.js',
   'persistence.test.js'

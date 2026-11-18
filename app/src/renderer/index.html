@@ -160,6 +160,29 @@
         <h2>設定</h2>
 
         <div class="setting-group">
+          <h3>更新</h3>
+          <p class="muted" id="update-version">確認中…</p>
+          <div class="row">
+            <button id="update-check">更新を確認</button>
+            <button id="update-apply" class="ghost" hidden>更新する</button>
+            <button id="update-restart" class="ghost" hidden>再起動して反映</button>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="update-auto" />
+            <span>起動時に更新を確認する</span>
+          </label>
+          <p class="notice" id="update-status" hidden></p>
+          <details id="update-details" hidden>
+            <summary>変更されるファイル</summary>
+            <pre class="log-preview" id="update-files"></pre>
+          </details>
+          <p class="muted">
+            GitHub から最新のソースを取得して入れ替えます。設定・ダウンロード履歴・
+            yt-dlp / ffmpeg はそのまま残ります。
+          </p>
+        </div>
+
+        <div class="setting-group">
           <h3>保存先</h3>
           <div class="row">
             <code id="download-dir"></code>
