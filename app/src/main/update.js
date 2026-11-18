@@ -23,6 +23,7 @@ const https = require('https');
 const crypto = require('crypto');
 
 const zip = require('./zip');
+const settings = require('./settings');
 
 const OWNER = 'noumukun0925-byte';
 const REPO = 'Douga-';
@@ -80,16 +81,41 @@ function writeLocalCommit(sha, root = rootDir()) {
 /* ---------------- 通信 ---------------- */
 
 /**
+ * アクセストークンを送ってよい相手。
+ *
+ * リダイレクトを追うときに無条件で持ち回すと、GitHub 以外へ
+ * 飛ばされた場合にトークンを渡してしまう。送り先を限定する。
+ */
+const TOKEN_HOSTS = ['api.github.com', 'codeload.github.com'];
+
+function tokenFor(url, explicit) {
+  let token = '';
+  try {
+    token = ((explicit === undefined ? settings.get().githubToken : explicit) || '').trim();
+  } catch {
+    return null;
+  }
+  if (!token) return null;
+  try {
+    return TOKEN_HOSTS.includes(new URL(url).hostname) ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 本文をまとめて受け取る。リダイレクトは追う。
  * User-Agent には利用者を特定できる情報を入れない。
  */
 function get(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 8) return reject(new UpdateError('リダイレクトが多すぎます'));
-    const req = https.get(
-      url,
-      { headers: { 'User-Agent': 'Douga', Accept: '*/*' }, timeout: 60000 },
-      (res) => {
+    const headers = { 'User-Agent': 'Douga', Accept: '*/*' };
+    // 非公開リポジトリは、トークンが無いと 404 になる（403 ではない）
+    const token = tokenFor(url);
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const req = https.get(url, { headers, timeout: 60000 }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
           return resolve(get(new URL(res.headers.location, url).toString(), redirects + 1));
@@ -97,6 +123,20 @@ function get(url, redirects = 0) {
         if (res.statusCode === 403 && /rate limit/i.test(res.headers['x-ratelimit-remaining'] || '')) {
           res.resume();
           return reject(new UpdateError('GitHub の利用制限に達しました。しばらく待ってから試してください'));
+        }
+        if (res.statusCode === 404) {
+          res.resume();
+          return reject(
+            new UpdateError(
+              settings.get().githubToken
+                ? '見つかりませんでした。アクセストークンの権限（Contents: Read）を確認してください'
+                : 'リポジトリが非公開のため取得できません。公開するか、設定の「GitHub アクセストークン」を入力してください'
+            )
+          );
+        }
+        if (res.statusCode === 401) {
+          res.resume();
+          return reject(new UpdateError('アクセストークンが無効です。入力し直してください'));
         }
         if (res.statusCode !== 200) {
           res.resume();
@@ -106,8 +146,7 @@ function get(url, redirects = 0) {
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => resolve(Buffer.concat(chunks)));
         res.on('error', reject);
-      }
-    );
+    });
     req.on('timeout', () => req.destroy(new UpdateError('接続がタイムアウトしました')));
     req.on('error', (err) =>
       reject(err instanceof UpdateError ? err : new UpdateError(`通信に失敗しました: ${err.message}`))
@@ -135,7 +174,8 @@ async function latest() {
 
 /** ソース一式を取ってきて展開する */
 async function fetchTree() {
-  const url = `https://codeload.github.com/${OWNER}/${REPO}/zip/refs/heads/${BRANCH}`;
+  // API 経由なら非公開リポジトリでもトークンで取得できる
+  const url = `https://api.github.com/repos/${OWNER}/${REPO}/zipball/${BRANCH}`;
   const buf = await get(url);
   // GitHub の ZIP は全体が「リポジトリ名-ブランチ名/」で包まれている
   return zip.extract(buf, { strip: 1 });
@@ -375,5 +415,7 @@ module.exports = {
   REPLACE_DIRS,
   PROTECTED,
   VERSION_FILE,
-  STALE_DEPS_FILE
+  STALE_DEPS_FILE,
+  TOKEN_HOSTS,
+  tokenFor
 };

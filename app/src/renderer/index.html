@@ -184,6 +184,19 @@
             <span>起動時に更新を確認する</span>
           </label>
           <p class="notice" id="update-status" hidden></p>
+          <details id="update-token-box">
+            <summary>GitHub アクセストークン（リポジトリが非公開のときだけ必要）</summary>
+            <label class="field">
+              <span>トークン</span>
+              <input type="password" id="github-token" placeholder="github_pat_... / ghp_..." autocomplete="off" />
+            </label>
+            <p class="muted">
+              リポジトリを公開にすれば不要です。非公開のまま使う場合は、GitHub の
+              Settings → Developer settings → Personal access tokens で
+              <strong>Contents: Read</strong> だけを許可したトークンを作って貼り付けてください。
+              設定ファイルにそのまま保存されるので、権限は最小限にしてください。
+            </p>
+          </details>
           <details id="update-details" hidden>
             <summary>変更されるファイル</summary>
             <pre class="log-preview" id="update-files"></pre>

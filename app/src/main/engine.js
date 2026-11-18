@@ -1,6 +1,8 @@
 'use strict';
 
 const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const binaries = require('./binaries');
 const settings = require('./settings');
@@ -601,6 +603,78 @@ function buildSortFields(cfg) {
 /** 再エンコードが発生する = 音質が落ちる形式 */
 const LOSSY_AUDIO = ['mp3', 'aac', 'opus', 'vorbis'];
 
+/** 最終ファイルを探すときに試す拡張子 */
+const MEDIA_EXTS = [
+  '.mkv', '.mp4', '.webm', '.mov', '.m4v', '.flv', '.avi',
+  '.m4a', '.mp3', '.opus', '.flac', '.wav', '.aac', '.ogg'
+];
+
+/**
+ * 保存されたファイルの場所を決める。
+ *
+ * これまでは yt-dlp の出力行から推測していたが、外れると後処理が
+ * 「後処理の対象ファイルが見つかりません」で落ちていた。
+ * 結合でコンテナが変わる場合（mp4 で始まり mkv で終わる）や、
+ * 結合の行を取りこぼした場合に、消えた一時ファイルを指してしまう。
+ *
+ * yt-dlp 自身に最終パスを書かせたものを第一候補にし、
+ * 古い yt-dlp や書き出しに失敗した場合のために推測も残す。
+ *
+ * @param {{printed?: string, merged?: string, destination?: string, outDir?: string, startedAt?: number}} info
+ * @param {object} [io] テスト用の差し替え口
+ */
+function resolveOutputPath(info, io = {}) {
+  const exists = io.exists || ((target) => fs.existsSync(target));
+  const listDir = io.listDir || ((dir) => fs.readdirSync(dir));
+  const modifiedAt = io.modifiedAt || ((target) => fs.statSync(target).mtimeMs);
+
+  // 1. そのまま存在するもの
+  for (const candidate of [info.printed, info.merged, info.destination]) {
+    if (candidate && exists(candidate)) return candidate;
+  }
+
+  // 2. 拡張子だけ変わった場合。
+  //    結合や変換で中身が mp4 に収まらないと mkv になる
+  const base = info.merged || info.destination || info.printed;
+  if (base) {
+    const stem = base.slice(0, base.length - path.extname(base).length);
+    for (const ext of MEDIA_EXTS) {
+      if (exists(stem + ext)) return stem + ext;
+    }
+  }
+
+  // 3. 保存先の中から、この回に作られた一番新しい動画・音声を探す。
+  //    ここまで来るのは出力を読み取れなかったときだけ
+  const dir = info.outDir || (base ? path.dirname(base) : null);
+  if (!dir || !exists(dir)) return base || null;
+
+  let best = null;
+  let bestTime = -Infinity;
+  let names = [];
+  try {
+    names = listDir(dir);
+  } catch {
+    return base || null;
+  }
+  for (const name of names) {
+    if (!MEDIA_EXTS.includes(path.extname(name).toLowerCase())) continue;
+    const full = path.join(dir, name);
+    let time;
+    try {
+      time = modifiedAt(full);
+    } catch {
+      continue;
+    }
+    // ダウンロード開始より前からあったファイルは無関係
+    if (info.startedAt && time < info.startedAt - 1000) continue;
+    if (time > bestTime) {
+      bestTime = time;
+      best = full;
+    }
+  }
+  return best || base || null;
+}
+
 /** ファイル名に使えない文字を落とす（Windows の禁止文字に合わせる） */
 function sanitizeFileName(value) {
   const name = String(value)
@@ -639,7 +713,7 @@ function outputTemplateFor(job) {
  * ダウンロード用の yt-dlp 引数を組み立てる。
  * 実行と切り離してあるので、引数の組み立て方だけを単体で検証できる。
  */
-function buildDownloadArgs(job, cfg) {
+function buildDownloadArgs(job, cfg, { pathFile } = {}) {
   const outDir = job.outDir || cfg.downloadDir;
   const template = path.join(outDir, outputTemplateFor(job));
 
@@ -674,6 +748,8 @@ function buildDownloadArgs(job, cfg) {
     args.push('--write-subs', '--write-auto-subs', '--sub-langs', 'ja,en,-live_chat', '--embed-subs');
   }
   if (job.embedThumbnail) args.push('--embed-thumbnail');
+  // 全ての後処理が終わったあとの、本当の保存先を書き出させる
+  if (pathFile) args.push('--print-to-file', 'after_move:filepath', pathFile);
   args.push(job.url);
   return args;
 }
@@ -683,12 +759,20 @@ function buildDownloadArgs(job, cfg) {
  */
 async function download(job, { onProgress, onLog, signal } = {}) {
   const cfg = settings.get();
-  const args = buildDownloadArgs(job, cfg);
+  const startedAt = Date.now();
+  const outDir = job.outDir || cfg.downloadDir;
+
+  // yt-dlp に最終的なファイル名を書かせる。出力の読み取りより確実
+  const pathFile = path.join(
+    os.tmpdir(),
+    `douga-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`
+  );
+  const args = buildDownloadArgs(job, cfg, { pathFile });
 
   let destination = null;
   let merged = null;
 
-  await run(args, {
+  await runWithFallback(args, pathFile, {
     signal,
     onLine(line) {
       if (line.startsWith(PROGRESS_PREFIX)) {
@@ -721,7 +805,43 @@ async function download(job, { onProgress, onLog, signal } = {}) {
     }
   });
 
-  return { filePath: merged || destination };
+  const printed = readPrintedPath(pathFile);
+  return {
+    filePath: resolveOutputPath({ printed, merged, destination, outDir, startedAt })
+  };
+}
+
+/** yt-dlp が書き出した最終パスを読む。無ければ null */
+function readPrintedPath(pathFile) {
+  try {
+    const lines = fs
+      .readFileSync(pathFile, 'utf8')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return lines.length ? lines[lines.length - 1] : null;
+  } catch {
+    return null;
+  } finally {
+    try {
+      fs.unlinkSync(pathFile);
+    } catch {
+      /* 消せなくても害は無い */
+    }
+  }
+}
+
+/** 古い yt-dlp は --print-to-file を知らない。その場合だけ外して再実行する */
+async function runWithFallback(args, pathFile, options) {
+  try {
+    return await run(args, options);
+  } catch (err) {
+    if (!/no such option|unrecognized arguments|Unknown option/i.test(err.message || '')) throw err;
+    const index = args.indexOf('--print-to-file');
+    if (index < 0) throw err;
+    const without = [...args.slice(0, index), ...args.slice(index + 3)];
+    return run(without, options);
+  }
 }
 
 module.exports = {
@@ -739,6 +859,8 @@ module.exports = {
   buildSelector,
   buildSortFields,
   buildDownloadArgs,
+  resolveOutputPath,
+  MEDIA_EXTS,
   normalizeFormats,
   tokenizeArgs
 };

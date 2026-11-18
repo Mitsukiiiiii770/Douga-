@@ -508,6 +508,9 @@ async function loadSettings() {
   $('bridge-enabled').checked = s.bridgeEnabled;
   $('accept-cookies').checked = s.acceptCookies;
   $('update-auto').checked = s.autoUpdateCheck !== false;
+  $('github-token').value = s.githubToken || '';
+  // トークンが要る状況でだけ開いておく
+  $('update-token-box').open = !!s.githubToken;
   renderClients(s.pairedClients);
 }
 
@@ -981,6 +984,11 @@ setTimeout(async () => {
 }
 
 $('update-check').addEventListener('click', () => checkUpdate());
+
+$('github-token').addEventListener('change', async (event) => {
+  await api.settings.set({ githubToken: event.target.value.trim() });
+  updateStatus('トークンを保存しました。もう一度「更新を確認」を押してください。');
+});
 
 $('update-auto').addEventListener('change', async (event) => {
   await api.settings.set({ autoUpdateCheck: event.target.checked });
