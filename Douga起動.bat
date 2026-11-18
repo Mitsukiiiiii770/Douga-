@@ -19,6 +19,23 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem 自動更新で依存パッケージが変わると、アプリ自身は入れ直せないので
+rem 印だけ残してある。ここで拾って入れ直す。
+if exist ".deps-stale" (
+  echo.
+  echo   更新された部品を準備しています。数分かかります...
+  echo.
+  call npm install
+  if errorlevel 1 (
+    echo.
+    echo   準備に失敗しました。上のメッセージを確認してください。
+    echo.
+    pause
+    exit /b 1
+  )
+  del ".deps-stale" >nul 2>nul
+)
+
 if not exist "node_modules" (
   echo.
   echo   初回の準備をしています。数分かかります...

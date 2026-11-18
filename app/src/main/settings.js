@@ -27,7 +27,9 @@ const DEFAULTS = {
   postEncoder: 'x264',
   postCrf: 18,
   postFrameRate: 30,
-  realesrganPath: ''
+  realesrganPath: '',
+  // 起動時に更新を確認する。既定は有効（手で ZIP を落とす手間を無くすのが目的のため）
+  autoUpdateCheck: true
 };
 
 let cache = null;

@@ -507,6 +507,7 @@ async function loadSettings() {
   $('bridge-port').value = s.bridgePort;
   $('bridge-enabled').checked = s.bridgeEnabled;
   $('accept-cookies').checked = s.acceptCookies;
+  $('update-auto').checked = s.autoUpdateCheck !== false;
   renderClients(s.pairedClients);
 }
 
@@ -889,3 +890,166 @@ $('diag-reset').addEventListener('click', async () => {
   $('diag-show').textContent = '内容を見る';
   diagStatus('記録を消しました');
 });
+
+/* ---------------- 更新 ---------------- */
+
+/**
+ * GitHub から最新のソースを取ってきて入れ替える。
+ *
+ * これが無いと、修正のたびに ZIP を落として展開して上書き、という
+ * 手作業が要る。設定とダウンロード履歴は別フォルダにあるので、
+ * ソースを丸ごと入れ替えても消えない。
+ */
+function updateStatus(text, isError = false) {
+  const node = $('update-status');
+  node.textContent = text;
+  node.hidden = !text;
+  node.classList.toggle('error', isError);
+}
+
+async function showVersion() {
+  try {
+    const info = await api.update.version();
+    const commit = info.commit ? info.commit.slice(0, 7) : '不明（手動で展開した版）';
+    $('update-version').textContent = `バージョン ${info.app}（${info.branch} / ${commit}）`;
+  } catch {
+    $('update-version').textContent = '';
+  }
+}
+
+function describeChanges(changes) {
+  const lines = [];
+  for (const file of changes.added) lines.push(`+ ${file}`);
+  for (const file of changes.changed) lines.push(`M ${file}`);
+  for (const file of changes.removed) lines.push(`- ${file}`);
+  return lines.join('\n');
+}
+
+async function checkUpdate({ quiet = false } = {}) {
+  const button = $('update-check');
+  button.disabled = true;
+  button.textContent = '確認中…';
+  $('update-apply').hidden = true;
+  $('update-details').hidden = true;
+  try {
+    const result = await api.update.check();
+    if (!result.ok) {
+      // 起動時の自動確認では、繋がらないだけで驚かせない
+      if (!quiet) updateStatus(result.error, true);
+      return;
+    }
+    await showVersion();
+
+/**
+ * 起動時の確認。
+ *
+ * 画面が出てすぐに通信すると立ち上がりが重く感じるので、少し待ってから。
+ * 繋がらないときは黙って諦める（更新の確認に失敗しただけで、
+ * 本来やりたいダウンロードの邪魔はしない）。
+ */
+setTimeout(async () => {
+  try {
+    const s = await api.settings.get();
+    if (s.autoUpdateCheck === false) return;
+    await checkUpdate({ quiet: true });
+  } catch {
+    /* 確認できなくても使用には支障がない */
+  }
+}, 3000);
+
+    if (result.upToDate) {
+      if (!quiet) updateStatus('最新版です');
+      return;
+    }
+
+    const count =
+      result.changes.changed.length + result.changes.added.length + result.changes.removed.length;
+    const note = result.latest.message ? `「${result.latest.message}」` : '';
+    updateStatus(
+      `更新があります: ${note} — ${count} ファイル` +
+        (result.depsChanged ? '（※ 依存パッケージが変わるため npm install が必要です）' : '')
+    );
+    $('update-files').textContent = describeChanges(result.changes);
+    $('update-details').hidden = false;
+    $('update-apply').hidden = false;
+  } catch (err) {
+    if (!quiet) updateStatus(err.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = '更新を確認';
+  }
+}
+
+$('update-check').addEventListener('click', () => checkUpdate());
+
+$('update-auto').addEventListener('change', async (event) => {
+  await api.settings.set({ autoUpdateCheck: event.target.checked });
+});
+
+$('update-apply').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = '更新中…';
+  try {
+    const result = await api.update.apply();
+    if (!result.ok) {
+      updateStatus(result.error, true);
+      return;
+    }
+    await showVersion();
+
+/**
+ * 起動時の確認。
+ *
+ * 画面が出てすぐに通信すると立ち上がりが重く感じるので、少し待ってから。
+ * 繋がらないときは黙って諦める（更新の確認に失敗しただけで、
+ * 本来やりたいダウンロードの邪魔はしない）。
+ */
+setTimeout(async () => {
+  try {
+    const s = await api.settings.get();
+    if (s.autoUpdateCheck === false) return;
+    await checkUpdate({ quiet: true });
+  } catch {
+    /* 確認できなくても使用には支障がない */
+  }
+}, 3000);
+    $('update-apply').hidden = true;
+    $('update-details').hidden = true;
+    if (result.depsChanged) {
+      updateStatus(
+        `${result.updated} ファイルを更新しました。` +
+          '依存パッケージが変わったので、一度アプリを閉じて「Douga起動.bat」から開き直してください。'
+      );
+    } else {
+      updateStatus(`${result.updated} ファイルを更新しました。再起動すると反映されます。`);
+      $('update-restart').hidden = false;
+    }
+  } catch (err) {
+    updateStatus(err.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = '更新する';
+  }
+});
+
+$('update-restart').addEventListener('click', () => api.update.restart());
+
+showVersion();
+
+/**
+ * 起動時の確認。
+ *
+ * 画面が出てすぐに通信すると立ち上がりが重く感じるので、少し待ってから。
+ * 繋がらないときは黙って諦める（更新の確認に失敗しただけで、
+ * 本来やりたいダウンロードの邪魔はしない）。
+ */
+setTimeout(async () => {
+  try {
+    const s = await api.settings.get();
+    if (s.autoUpdateCheck === false) return;
+    await checkUpdate({ quiet: true });
+  } catch {
+    /* 確認できなくても使用には支障がない */
+  }
+}, 3000);
