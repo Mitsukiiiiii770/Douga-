@@ -29,7 +29,9 @@ const DEFAULTS = {
   postFrameRate: 30,
   realesrganPath: '',
   // 起動時に更新を確認する。既定は有効（手で ZIP を落とす手間を無くすのが目的のため）
-  autoUpdateCheck: true
+  autoUpdateCheck: true,
+  // 非公開リポジトリから更新を取るときだけ必要。空なら送らない
+  githubToken: ''
 };
 
 let cache = null;

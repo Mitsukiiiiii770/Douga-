@@ -142,6 +142,29 @@ function write(root, relPath, content) {
     '黙って飛ばすのではなく例外にする'
   );
 
+  group('アクセストークンの送り先');
+  const secret = 'ghp_dummy_for_test';
+  check(
+    'GitHub の API には送る',
+    update.tokenFor('https://api.github.com/repos/a/b/commits/v1', secret) === secret
+  );
+  check(
+    'GitHub の配信元にも送る',
+    update.tokenFor('https://codeload.github.com/a/b/zip/refs/heads/v1', secret) === secret
+  );
+  check(
+    'GitHub 以外には送らない',
+    update.tokenFor('https://evil.example/steal', secret) === null,
+    'リダイレクトで外へ飛ばされてもトークンを渡さないため'
+  );
+  check(
+    '似た名前のドメインにも送らない',
+    update.tokenFor('https://api.github.com.evil.example/x', secret) === null
+  );
+  check('トークンが空なら送らない', update.tokenFor('https://api.github.com/x', '') === null);
+  check('空白だけでも送らない', update.tokenFor('https://api.github.com/x', '   ') === null);
+  check('壊れた URL でも落ちない', update.tokenFor('これは URL ではない', secret) === null);
+
   group('消してはいけない場所');
   check('node_modules は守る', update.isProtected('app/node_modules/electron/index.js'));
   check('ダウンロード済みの yt-dlp / ffmpeg は守る', update.isProtected('app/bin/yt-dlp.exe'));

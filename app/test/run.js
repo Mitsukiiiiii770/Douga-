@@ -22,6 +22,7 @@ const suites = [
   'diagnostics.test.js',
   'update.test.js',
   'launcher.test.js',
+  'outpath.test.js',
   'bridge.test.js',
   'queue.test.js',
   'persistence.test.js'
