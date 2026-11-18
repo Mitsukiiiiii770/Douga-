@@ -31,7 +31,11 @@ const DEFAULTS = {
   // 起動時に更新を確認する。既定は有効（手で ZIP を落とす手間を無くすのが目的のため）
   autoUpdateCheck: true,
   // 非公開リポジトリから更新を取るときだけ必要。空なら送らない
-  githubToken: ''
+  githubToken: '',
+  // GitHub を経由せず、手元のフォルダに置いたパッチから更新する場合の置き場
+  patchDir: '',
+  // 更新前の状態を何世代残すか
+  keepVersions: 3
 };
 
 let cache = null;

@@ -256,7 +256,7 @@ ipcMain.handle('update:apply', async () => {
   try {
     const tree = pendingUpdate ? pendingUpdate.tree : null;
     const version = pendingUpdate ? pendingUpdate.version : null;
-    const result = await update.apply({ tree, version });
+    const result = await update.apply({ tree, version, keep: settings.get().keepVersions });
     pendingUpdate = null;
     return { ok: true, ...result };
   } catch (err) {
@@ -303,6 +303,44 @@ ipcMain.handle('shell:createShortcut', async () => {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+});
+
+/* ---------------- 過去の版とパッチ ---------------- */
+
+ipcMain.handle('update:versions', () => update.listVersions());
+
+ipcMain.handle('update:restore', async (_event, name) => {
+  try {
+    return { ok: true, ...update.restoreVersion(name) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('update:patches', () => {
+  const dir = settings.get().patchDir;
+  if (!dir) return { ok: true, dir: '', patches: [] };
+  return { ok: true, dir, patches: update.listPatches(dir) };
+});
+
+ipcMain.handle('update:applyPatch', async (_event, name) => {
+  try {
+    const cfg = settings.get();
+    if (!cfg.patchDir) return { ok: false, error: 'パッチ置き場が設定されていません' };
+    return { ok: true, ...update.applyPatch(cfg.patchDir, name, { keep: cfg.keepVersions }) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('update:choosePatchDir', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'パッチ置き場を選ぶ',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  settings.set({ patchDir: result.filePaths[0] });
+  return result.filePaths[0];
 });
 
 ipcMain.handle('update:version', () => ({
