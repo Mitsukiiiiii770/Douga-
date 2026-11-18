@@ -318,6 +318,153 @@ function write(root, relPath, content) {
   check('失敗したら版も更新しない', update.localCommit(broken) === null);
   check('控えのファイルを残さない', !update.walk(broken, broken).some((f) => f.endsWith('.douga-bak')));
 
+  group('過去の版を取っておく');
+  const keepRoot = tempRoot();
+  write(keepRoot, 'app/src/a.js', 'v1');
+  write(keepRoot, 'README.md', 'v1');
+  write(keepRoot, 'app/node_modules/x/i.js', '触るな');
+  write(keepRoot, 'app/bin/yt-dlp.exe', '触るな');
+
+  const saved = update.backupCurrent(keepRoot, { sha: 'e'.repeat(40), note: 'テスト' });
+  check('控えを作る', saved && saved.files === 2, saved && saved.files);
+  check('一覧に出る', update.listVersions(keepRoot).length === 1);
+  check('覚書が読める', update.listVersions(keepRoot)[0].note === 'テスト');
+  check('版が記録される', update.listVersions(keepRoot)[0].sha === 'e'.repeat(40));
+  check(
+    'node_modules は控えない',
+    !fs.existsSync(path.join(keepRoot, update.VERSIONS_DIR, saved.name, 'app/node_modules')),
+    '容量が無駄になるうえ、戻すときに壊れる'
+  );
+  check(
+    'ダウンロード済みの yt-dlp も控えない',
+    !fs.existsSync(path.join(keepRoot, update.VERSIONS_DIR, saved.name, 'app/bin'))
+  );
+
+  group('古い世代を消す');
+  const manyRoot = tempRoot();
+  write(manyRoot, 'app/src/a.js', 'x');
+  const names = [];
+  for (let i = 0; i < 5; i++) {
+    // 名前は秒単位なので、並び順を確実にするため自分で作る
+    const dir = path.join(manyRoot, update.VERSIONS_DIR, `2026111${i}-120000`);
+    fs.mkdirSync(path.join(dir, 'app/src'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'app/src/a.js'), `v${i}`);
+    names.push(`2026111${i}-120000`);
+  }
+  check('5 世代ある', update.listVersions(manyRoot).length === 5);
+  const pruned = update.pruneVersions(manyRoot, 3);
+  check('超えた分を消す', pruned.length === 2, pruned);
+  check('残るのは指定した数', update.listVersions(manyRoot).length === 3);
+  check('新しいものが残る', update.listVersions(manyRoot)[0].name === names[4]);
+  check('古いものから消える', !update.listVersions(manyRoot).some((v) => v.name === names[0]));
+  check('0 を指定すると全部消える', (() => {
+    update.pruneVersions(manyRoot, 0);
+    return update.listVersions(manyRoot).length === 0;
+  })());
+
+  group('過去の版に戻す');
+  const backRoot = tempRoot();
+  write(backRoot, 'app/src/a.js', '古い中身');
+  write(backRoot, 'README.md', '古い説明');
+  update.backupCurrent(backRoot, { sha: 'f'.repeat(40), note: '更新前' });
+  const old = update.listVersions(backRoot)[0].name;
+
+  write(backRoot, 'app/src/a.js', '新しい中身');
+  write(backRoot, 'app/src/あとで増えた.js', '増えた');
+  const back = update.restoreVersion(old, { root: backRoot });
+
+  check('戻した件数を返す', back.restored === 2, back.restored);
+  check('中身が戻る', fs.readFileSync(path.join(backRoot, 'app/src/a.js'), 'utf8') === '古い中身');
+  check(
+    '戻した版に無いファイルは消す',
+    !fs.existsSync(path.join(backRoot, 'app/src/あとで増えた.js'))
+  );
+  check('版の記録も戻る', update.localCommit(backRoot) === 'f'.repeat(40));
+  check(
+    '戻す前の状態も控える',
+    update.listVersions(backRoot).length === 2,
+    '戻したこと自体をやり直せるようにするため'
+  );
+  check('知らない版を指定したら例外', (() => {
+    try {
+      update.restoreVersion('存在しない版', { root: backRoot });
+      return false;
+    } catch (err) {
+      return /見つかりません/.test(err.message);
+    }
+  })());
+
+  group('手元のパッチを読む');
+  const patchRoot = tempRoot();
+  const patchDir = tempRoot();
+  write(patchRoot, 'app/src/a.js', '元の中身');
+  write(patchRoot, 'app/src/消される.js', 'いらない');
+
+  write(patchDir, '20261118-01/app/src/a.js', '直した中身');
+  write(
+    patchDir,
+    '20261118-01/patch.json',
+    JSON.stringify({ note: '検出の修正', remove: ['app/src/消される.js'] })
+  );
+  write(patchDir, '20261118-02/app/src/b.js', '新機能');
+
+  const patches = update.listPatches(patchDir, { root: patchRoot });
+  check('パッチを見つける', patches.length === 2, patches.length);
+  check('名前順に並ぶ', patches[0].name === '20261118-01');
+  check('覚書を読む', patches[0].note === '検出の修正');
+  check('patch.json 自体はファイル数に数えない', patches[0].files.length === 1, patches[0].files);
+  check('まだ当てていない扱い', patches.every((patch) => !patch.applied));
+  check('置き場が無ければ空', update.listPatches('', { root: patchRoot }).length === 0);
+  check('存在しない場所でも落ちない', update.listPatches('/存在しない場所').length === 0);
+
+  group('パッチを当てる');
+  const applied = update.applyPatch(patchDir, '20261118-01', { root: patchRoot });
+  check('書き込んだ件数を返す', applied.written === 1, applied.written);
+  check('中身が入れ替わる', fs.readFileSync(path.join(patchRoot, 'app/src/a.js'), 'utf8') === '直した中身');
+  check('指定されたファイルを消す', !fs.existsSync(path.join(patchRoot, 'app/src/消される.js')));
+  check('当てる前の状態を控える', update.listVersions(patchRoot).length === 1);
+  check('適用済みとして記録する', update.appliedPatches(patchRoot).includes('20261118-01'));
+  check(
+    '二度目は候補に出ない',
+    !update.pendingPatches(patchDir, { root: patchRoot }).some((p) => p.name === '20261118-01')
+  );
+  check(
+    'まだのパッチは候補に残る',
+    update.pendingPatches(patchDir, { root: patchRoot }).some((p) => p.name === '20261118-02')
+  );
+
+  group('パッチは指定が無ければ何も消さない');
+  const safeRoot = tempRoot();
+  const safeDir = tempRoot();
+  write(safeRoot, 'app/src/a.js', '元');
+  write(safeRoot, 'app/src/触られないはず.js', '残る');
+  write(safeDir, 'p1/app/src/a.js', '直した');
+  update.applyPatch(safeDir, 'p1', { root: safeRoot });
+  check(
+    '一部だけのパッチで他が消えない',
+    fs.existsSync(path.join(safeRoot, 'app/src/触られないはず.js')),
+    'パッチは差分なので、入っていない＝削除ではない'
+  );
+
+  group('パッチの削除指定も信用しない');
+  const evilRoot = tempRoot();
+  const evilDir = tempRoot();
+  write(evilRoot, 'app/src/a.js', '元');
+  write(evilRoot, 'app/bin/yt-dlp.exe', '守る');
+  write(evilDir, 'p1/app/src/a.js', '直した');
+  write(
+    evilDir,
+    'p1/patch.json',
+    JSON.stringify({ remove: ['../../外に出る.txt', 'app/bin/yt-dlp.exe', 'app/node_modules/x'] })
+  );
+  const guarded = update.applyPatch(evilDir, 'p1', { root: evilRoot });
+  check('外へ出る指定は無視する', guarded.deleted === 0, guarded.deleted);
+  check('守る場所は消さない', fs.existsSync(path.join(evilRoot, 'app/bin/yt-dlp.exe')));
+
+  for (const dir of [keepRoot, manyRoot, backRoot, patchRoot, patchDir, safeRoot, safeDir, evilRoot, evilDir]) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   group('版の記録');
   check('更新後に版が記録される', update.localCommit(target) === 'a'.repeat(40));
   check('壊れた版ファイルは無視する', (() => {

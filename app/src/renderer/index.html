@@ -208,6 +208,33 @@
         </div>
 
         <div class="setting-group">
+          <h3>パッチ置き場（GitHub を使わない更新）</h3>
+          <p class="muted">
+            指定したフォルダに置かれた更新を取り込みます。中身は変わったファイルだけで構いません。
+          </p>
+          <div class="row">
+            <code id="patch-dir">未設定</code>
+            <button id="patch-choose" class="ghost">フォルダを選ぶ</button>
+            <button id="patch-refresh" class="ghost">確認</button>
+          </div>
+          <ul class="client-list" id="patch-list"></ul>
+          <p class="notice" id="patch-status" hidden></p>
+        </div>
+
+        <div class="setting-group">
+          <h3>過去の版</h3>
+          <p class="muted">
+            更新する前の状態を自動で取っておきます。おかしくなったらここから戻せます。
+          </p>
+          <label class="field">
+            <span>残す世代数</span>
+            <input type="number" id="keep-versions" min="0" max="20" />
+          </label>
+          <ul class="client-list" id="version-list"></ul>
+          <p class="notice" id="version-status" hidden></p>
+        </div>
+
+        <div class="setting-group">
           <h3>保存先</h3>
           <div class="row">
             <code id="download-dir"></code>

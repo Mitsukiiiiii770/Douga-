@@ -51,7 +51,16 @@ const REPLACE_DIRS = ['app/src', 'app/test', 'extension', 'tools'];
  * node_modules と bin は ZIP に含まれないが、取り違えで消すと
  * 再インストールや再ダウンロードが必要になるので明示的に守る。
  */
-const PROTECTED = ['app/node_modules', 'app/bin', 'app/dist', '.git'];
+const PROTECTED = ['app/node_modules', 'app/bin', 'app/dist', '.git', 'versions'];
+
+/** 過去の版を取っておく場所 */
+const VERSIONS_DIR = 'versions';
+
+/** 既定で残す世代数。これを超えた古いものから消す */
+const DEFAULT_KEEP = 3;
+
+/** 適用済みのパッチを覚えておくファイル。同じものを二度当てないため */
+const APPLIED_FILE = '.douga-applied';
 
 class UpdateError extends Error {}
 
@@ -262,6 +271,269 @@ function dependenciesChanged(tree, root = rootDir()) {
     !same(current.devDependencies, next.devDependencies);
 }
 
+/* ---------------- 過去の版 ---------------- */
+
+/**
+ * 今の中身を versions/ に取っておく。
+ *
+ * 更新で動かなくなったとき、GitHub から古い版を探して落とし直すのは
+ * 手間がかかる。手元に数世代あれば、ボタン一つで戻せる。
+ */
+function backupCurrent(root = rootDir(), { sha = null, note = '' } = {}) {
+  const name = `${stampNow()}${sha ? `_${sha.slice(0, 7)}` : ''}`;
+  const dest = path.join(root, VERSIONS_DIR, name);
+
+  let count = 0;
+  for (const relPath of walk(root, root)) {
+    const from = path.join(root, relPath);
+    const to = path.join(dest, relPath);
+    try {
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.copyFileSync(from, to);
+      count++;
+    } catch {
+      /* 1 つ失敗しても控え全体は作る */
+    }
+  }
+  if (!count) return null;
+
+  try {
+    fs.writeFileSync(
+      path.join(dest, 'version.json'),
+      JSON.stringify({ sha, note, savedAt: new Date().toISOString(), files: count }, null, 2),
+      'utf8'
+    );
+  } catch {
+    /* 覚書が書けなくても戻すことはできる */
+  }
+  return { name, path: dest, files: count };
+}
+
+function stampNow(date = new Date()) {
+  const two = (n) => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}${two(date.getMonth() + 1)}${two(date.getDate())}` +
+    `-${two(date.getHours())}${two(date.getMinutes())}${two(date.getSeconds())}`
+  );
+}
+
+/** 取ってある版の一覧。新しい順 */
+function listVersions(root = rootDir()) {
+  let names = [];
+  try {
+    names = fs
+      .readdirSync(path.join(root, VERSIONS_DIR), { withFileTypes: true })
+      .filter((item) => item.isDirectory())
+      .map((item) => item.name);
+  } catch {
+    return [];
+  }
+  return names
+    .sort()
+    .reverse()
+    .map((name) => {
+      let info = {};
+      try {
+        info = JSON.parse(fs.readFileSync(path.join(root, VERSIONS_DIR, name, 'version.json'), 'utf8'));
+      } catch {
+        /* 覚書が無くても一覧には出す */
+      }
+      return {
+        name,
+        sha: info.sha || null,
+        note: info.note || '',
+        savedAt: info.savedAt || null,
+        files: info.files || null
+      };
+    });
+}
+
+/** 古い世代を消す。@returns 消した版の名前 */
+function pruneVersions(root = rootDir(), keep = DEFAULT_KEEP) {
+  const limit = Math.max(0, Number(keep) || 0);
+  const removed = [];
+  for (const entry of listVersions(root).slice(limit)) {
+    try {
+      fs.rmSync(path.join(root, VERSIONS_DIR, entry.name), { recursive: true, force: true });
+      removed.push(entry.name);
+    } catch {
+      /* 消せなくても次の更新で改めて試す */
+    }
+  }
+  return removed;
+}
+
+/**
+ * 取ってある版に戻す。
+ * 戻す前に今の中身も控えておくので、戻したこと自体をやり直せる。
+ */
+function restoreVersion(name, { root = rootDir() } = {}) {
+  const from = path.join(root, VERSIONS_DIR, name);
+  if (!fs.existsSync(from)) throw new UpdateError(`その版は見つかりません: ${name}`);
+
+  backupCurrent(root, { note: `${name} に戻す前の状態` });
+
+  const files = walk(from, from).filter((rel) => rel !== 'version.json');
+  if (!files.length) throw new UpdateError('その版には中身がありません');
+
+  const kept = new Set(files);
+  for (const relPath of files) {
+    const to = path.join(root, relPath);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(path.join(from, relPath), to);
+  }
+
+  // 戻した版に無いファイルは、入れ替え対象のフォルダからだけ消す
+  let removed = 0;
+  for (const dir of REPLACE_DIRS) {
+    for (const relPath of walk(path.join(root, dir), root)) {
+      if (kept.has(relPath)) continue;
+      try {
+        fs.unlinkSync(path.join(root, relPath));
+        removed++;
+      } catch {
+        /* 消せなくても戻した分は反映される */
+      }
+    }
+  }
+
+  let sha = null;
+  try {
+    sha = JSON.parse(fs.readFileSync(path.join(from, 'version.json'), 'utf8')).sha || null;
+  } catch {
+    /* 覚書が無ければ版は不明のまま */
+  }
+  if (sha) writeLocalCommit(sha, root);
+  else {
+    try {
+      fs.unlinkSync(versionPath(root));
+    } catch {
+      /* 元から無ければそれでよい */
+    }
+  }
+
+  return { name, restored: files.length, removed };
+}
+
+/* ---------------- 手元のフォルダから更新する ---------------- */
+
+/**
+ * パッチ置き場から、まだ当てていないものを探す。
+ *
+ * GitHub を経由せず、このフォルダにファイルを置くだけで更新できる。
+ * 中身は「変わったファイルだけ」でよい。
+ *
+ *   パッチ置き場/
+ *     20261118-01/
+ *       patch.json            ← 任意。{"note": "...", "remove": ["消すファイル"]}
+ *       app/src/main/engine.js
+ *
+ * 安全のため、patch.json の remove に書かれていないファイルは消さない。
+ * 一部のファイルしか入っていないパッチで、他が全部消えては困る。
+ */
+function listPatches(dir, { root = rootDir() } = {}) {
+  if (!dir) return [];
+  let names = [];
+  try {
+    names = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((item) => item.isDirectory())
+      .map((item) => item.name)
+      .sort();
+  } catch {
+    return [];
+  }
+
+  const applied = new Set(appliedPatches(root));
+  return names.map((name) => {
+    let info = {};
+    try {
+      info = JSON.parse(fs.readFileSync(path.join(dir, name, 'patch.json'), 'utf8'));
+    } catch {
+      /* 覚書は任意 */
+    }
+    const files = walk(path.join(dir, name), path.join(dir, name)).filter((f) => f !== 'patch.json');
+    return {
+      name,
+      note: info.note || '',
+      remove: Array.isArray(info.remove) ? info.remove : [],
+      files,
+      applied: applied.has(name)
+    };
+  });
+}
+
+/** まだ当てていないパッチだけ */
+function pendingPatches(dir, options = {}) {
+  return listPatches(dir, options).filter((patch) => !patch.applied && patch.files.length);
+}
+
+function appliedPatches(root = rootDir()) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(root, APPLIED_FILE), 'utf8')).applied || [];
+  } catch {
+    return [];
+  }
+}
+
+function markApplied(name, root = rootDir()) {
+  const list = appliedPatches(root);
+  if (!list.includes(name)) list.push(name);
+  try {
+    fs.writeFileSync(path.join(root, APPLIED_FILE), JSON.stringify({ applied: list }, null, 2), 'utf8');
+  } catch {
+    /* 記録できなければ、次回また候補に出るだけ */
+  }
+  return list;
+}
+
+/**
+ * パッチを 1 つ当てる。
+ * 書き換える前に今の中身を控えるのは GitHub 経由の更新と同じ。
+ */
+function applyPatch(dir, name, { root = rootDir(), keep = DEFAULT_KEEP } = {}) {
+  const source = path.join(dir, name);
+  const files = walk(source, source).filter((f) => f !== 'patch.json');
+  if (!files.length) throw new UpdateError('そのパッチには中身がありません');
+
+  let remove = [];
+  try {
+    const info = JSON.parse(fs.readFileSync(path.join(source, 'patch.json'), 'utf8'));
+    if (Array.isArray(info.remove)) remove = info.remove;
+  } catch {
+    /* 覚書が無ければ何も消さない */
+  }
+
+  backupCurrent(root, { sha: localCommit(root), note: `パッチ ${name} を当てる前の状態` });
+
+  let written = 0;
+  for (const relPath of files) {
+    if (isProtected(relPath)) continue;
+    const to = path.join(root, relPath);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(path.join(source, relPath), to);
+    written++;
+  }
+
+  let deleted = 0;
+  for (const relPath of remove) {
+    const safe = zip.safePath(relPath);
+    // パッチの中身も素性が確かとは限らないので、外へ出る指定は無視する
+    if (!safe || isProtected(safe)) continue;
+    try {
+      fs.unlinkSync(path.join(root, safe));
+      deleted++;
+    } catch {
+      /* 既に無ければそれでよい */
+    }
+  }
+
+  markApplied(name, root);
+  const pruned = pruneVersions(root, keep);
+
+  return { name, written, deleted, pruned, depsChanged: files.includes('app/package.json') };
+}
+
 /* ---------------- 確認と適用 ---------------- */
 
 /**
@@ -310,13 +582,16 @@ async function check({ root = rootDir() } = {}) {
  * 移す……のが理想だが、Windows でフォルダをまたぐ移動は失敗しやすい。
  * 代わりに、書き換える前のファイルを .bak として残し、失敗したら戻す。
  */
-async function apply({ root = rootDir(), tree = null, version = null } = {}) {
+async function apply({ root = rootDir(), tree = null, version = null, keep = DEFAULT_KEEP } = {}) {
   const files = tree || (await fetchTree());
   // 確認のときに取った版をそのまま使う。無ければ聞きに行く
   const newest = version || (await latest());
   const changes = diff(files, root);
   // 書き換える前に調べる。書き換えた後では比較できなくなる
   const depsDiffered = dependenciesChanged(files, root);
+
+  // 書き換える前に、今の中身を丸ごと控えておく
+  backupCurrent(root, { sha: localCommit(root), note: `${newest.sha.slice(0, 7)} へ更新する前の状態` });
 
   /** @type {Array<{full: string, backup: string|null}>} 戻すための控え */
   const done = [];
@@ -375,11 +650,14 @@ async function apply({ root = rootDir(), tree = null, version = null } = {}) {
     }
   }
 
+  const pruned = pruneVersions(root, keep);
+
   return {
     ok: true,
     version: newest,
     updated: changes.changed.length + changes.added.length,
     removed: changes.removed.length,
+    pruned,
     depsChanged
   };
 }
@@ -417,5 +695,18 @@ module.exports = {
   VERSION_FILE,
   STALE_DEPS_FILE,
   TOKEN_HOSTS,
-  tokenFor
+  tokenFor,
+  backupCurrent,
+  listVersions,
+  pruneVersions,
+  restoreVersion,
+  listPatches,
+  pendingPatches,
+  appliedPatches,
+  markApplied,
+  applyPatch,
+  stampNow,
+  VERSIONS_DIR,
+  APPLIED_FILE,
+  DEFAULT_KEEP
 };

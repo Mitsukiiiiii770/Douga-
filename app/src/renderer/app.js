@@ -509,6 +509,7 @@ async function loadSettings() {
   $('accept-cookies').checked = s.acceptCookies;
   $('update-auto').checked = s.autoUpdateCheck !== false;
   $('github-token').value = s.githubToken || '';
+  $('keep-versions').value = s.keepVersions === undefined ? 3 : s.keepVersions;
   // トークンが要る状況でだけ開いておく
   $('update-token-box').open = !!s.githubToken;
   renderClients(s.pairedClients);
@@ -1088,3 +1089,150 @@ $('make-shortcut').addEventListener('click', async (event) => {
     button.disabled = false;
   }
 });
+
+/* ---------------- パッチ置き場と過去の版 ---------------- */
+
+/**
+ * GitHub を経由しない更新と、更新前の状態への巻き戻し。
+ *
+ * GitHub 経由は履歴が残る代わりに、公開設定やトークンが要る。
+ * 手元のフォルダにファイルを置くだけでも更新できるようにしておくと、
+ * 細かい修正を渡すときに速い。
+ */
+function note(id, text, isError = false) {
+  const node = $(id);
+  node.textContent = text;
+  node.hidden = !text;
+  node.classList.toggle('error', isError);
+}
+
+/**
+ * 文字列から要素を作る。
+ * パッチ名や覚書はアプリの外から来るので、innerHTML は使わない。
+ */
+function textNode(tag, text, className) {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+async function renderPatches() {
+  const result = await api.update.patches();
+  $('patch-dir').textContent = result.dir || '未設定';
+  const list = $('patch-list');
+  list.innerHTML = '';
+
+  if (!result.dir) {
+    note('patch-status', '');
+    return;
+  }
+  if (!result.patches.length) {
+    note('patch-status', 'このフォルダにパッチはありません。');
+    return;
+  }
+  const pending = result.patches.filter((patch) => !patch.applied && patch.files.length);
+  note(
+    'patch-status',
+    pending.length ? `${pending.length} 件の未適用パッチがあります。` : '全て適用済みです。'
+  );
+
+  for (const patch of result.patches) {
+    const item = document.createElement('li');
+    const box = document.createElement('div');
+    box.appendChild(textNode('strong', patch.name));
+
+    const facts = [`${patch.files.length} ファイル`];
+    if (patch.remove.length) facts.push(`${patch.remove.length} 件削除`);
+    if (patch.applied) facts.push('適用済み');
+    box.appendChild(textNode('span', ` — ${facts.join(' / ')}`, 'muted'));
+
+    if (patch.note) {
+      box.appendChild(document.createElement('br'));
+      box.appendChild(textNode('span', patch.note, 'muted'));
+    }
+    item.appendChild(box);
+
+    if (!patch.applied && patch.files.length) {
+      const button = textNode('button', '当てる', 'ghost');
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        const applied = await api.update.applyPatch(patch.name);
+        if (applied.ok) {
+          note(
+            'patch-status',
+            `${applied.written} ファイルを更新しました。` +
+              (applied.depsChanged
+                ? '依存が変わったので、閉じて Douga起動.bat から開き直してください。'
+                : '再起動すると反映されます。')
+          );
+          $('update-restart').hidden = false;
+          await renderPatches();
+          await renderVersions();
+        } else {
+          note('patch-status', applied.error, true);
+          button.disabled = false;
+        }
+      });
+      item.appendChild(button);
+    }
+    list.appendChild(item);
+  }
+}
+
+async function renderVersions() {
+  const versions = await api.update.versions();
+  const list = $('version-list');
+  list.innerHTML = '';
+  if (!versions.length) {
+    note('version-status', 'まだ取っていません。次の更新から残ります。');
+    return;
+  }
+  note('version-status', '');
+
+  for (const version of versions) {
+    const item = document.createElement('li');
+    const box = document.createElement('div');
+    box.appendChild(
+      textNode('strong', version.savedAt ? new Date(version.savedAt).toLocaleString('ja-JP') : version.name)
+    );
+    if (version.sha) box.appendChild(textNode('span', ` — ${version.sha.slice(0, 7)}`, 'muted'));
+    if (version.note) {
+      box.appendChild(document.createElement('br'));
+      box.appendChild(textNode('span', version.note, 'muted'));
+    }
+    item.appendChild(box);
+
+    const button = textNode('button', 'この版に戻す', 'ghost');
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      const result = await api.update.restore(version.name);
+      if (result.ok) {
+        note('version-status', `${result.restored} ファイルを戻しました。再起動すると反映されます。`);
+        $('update-restart').hidden = false;
+        await renderVersions();
+      } else {
+        note('version-status', result.error, true);
+        button.disabled = false;
+      }
+    });
+    item.appendChild(button);
+    list.appendChild(item);
+  }
+}
+
+$('patch-choose').addEventListener('click', async () => {
+  const dir = await api.update.choosePatchDir();
+  if (dir) await renderPatches();
+});
+
+$('patch-refresh').addEventListener('click', () => renderPatches());
+
+$('keep-versions').addEventListener('change', async (event) => {
+  const keep = Math.max(0, Math.min(20, Number(event.target.value) || 0));
+  event.target.value = keep;
+  await api.settings.set({ keepVersions: keep });
+});
+
+renderPatches().catch(() => {});
+renderVersions().catch(() => {});
