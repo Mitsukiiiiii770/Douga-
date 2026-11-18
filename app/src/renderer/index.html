@@ -160,6 +160,18 @@
         <h2>設定</h2>
 
         <div class="setting-group">
+          <h3>起動</h3>
+          <p class="muted">
+            「Douga起動.bat」から開くと黒いコンソール窓が残ります。
+            下のボタンでデスクトップにショートカットを作ると、窓を出さずに開けます。
+          </p>
+          <div class="row">
+            <button id="make-shortcut">デスクトップにショートカットを作る</button>
+          </div>
+          <p class="notice" id="shortcut-status" hidden></p>
+        </div>
+
+        <div class="setting-group">
           <h3>更新</h3>
           <p class="muted" id="update-version">確認中…</p>
           <div class="row">

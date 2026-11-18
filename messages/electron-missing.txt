@@ -1,0 +1,9 @@
+
+  Electron の本体が取得できていません。
+  このフォルダでコマンドプロンプトを開き、次を実行してから
+  もう一度このファイルを開いてください。
+
+      cd app
+      npm approve-scripts --allow-scripts-pending
+      npm rebuild electron
+

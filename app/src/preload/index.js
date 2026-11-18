@@ -52,7 +52,8 @@ contextBridge.exposeInMainWorld('douga', {
     check: () => ipcRenderer.invoke('update:check'),
     apply: () => ipcRenderer.invoke('update:apply'),
     restart: () => ipcRenderer.invoke('update:restart'),
-    version: () => ipcRenderer.invoke('update:version')
+    version: () => ipcRenderer.invoke('update:version'),
+    createShortcut: () => ipcRenderer.invoke('shell:createShortcut')
   },
   postprocess: {
     presets: () => ipcRenderer.invoke('postprocess:presets')
