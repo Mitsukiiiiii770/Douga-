@@ -25,7 +25,7 @@ const crypto = require('crypto');
 const zip = require('./zip');
 const settings = require('./settings');
 
-const OWNER = 'Mitsukiiiii770';
+const OWNER = 'Mitsukiiiiii770';
 const REPO = 'Douga-';
 /** 配布用のブランチ。開発用ブランチではなくこちらを見る */
 const BRANCH = 'v1';
