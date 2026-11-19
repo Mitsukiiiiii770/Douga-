@@ -62,11 +62,48 @@ const DEFAULT_KEEP = 3;
 /** 適用済みのパッチを覚えておくファイル。同じものを二度当てないため */
 const APPLIED_FILE = '.douga-applied';
 
+/**
+ * 前回の確認結果を覚えておくファイル。
+ *
+ * 未ログインの GitHub API は 1 時間に 60 回まで。これを使い切ると
+ * 更新の確認ごと止まる。ここに ETag と前回の判定を残しておくことで、
+ *   - 変わっていなければ 304（回数に数えられない）で済ませる
+ *   - 同じ版を二度調べ直さない
+ *   - 制限に当たったら、回復するまで自動確認を控える
+ */
+const STATE_FILE = '.douga-update-state.json';
+
+/** 自動確認の最短間隔。起動のたびに問い合わせる必要はない */
+const AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 class UpdateError extends Error {}
 
 function rootDir() {
   // app/src/main/update.js → リポジトリの一番上
   return path.resolve(__dirname, '..', '..', '..');
+}
+
+function statePath(root = rootDir()) {
+  return path.join(root, STATE_FILE);
+}
+
+function readState(root = rootDir()) {
+  try {
+    const data = JSON.parse(fs.readFileSync(statePath(root), 'utf8'));
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeState(patch, root = rootDir()) {
+  const next = { ...readState(root), ...patch };
+  try {
+    fs.writeFileSync(statePath(root), JSON.stringify(next, null, 2), 'utf8');
+  } catch {
+    /* 書けなくても動作は続く。次回また問い合わせるだけ */
+  }
+  return next;
 }
 
 function versionPath(root = rootDir()) {
@@ -116,32 +153,39 @@ function tokenFor(url, explicit) {
  * 本文をまとめて受け取る。リダイレクトは追う。
  * User-Agent には利用者を特定できる情報を入れない。
  */
-function get(url, redirects = 0) {
+function get(url, { etag = null, redirects = 0 } = {}) {
   return new Promise((resolve, reject) => {
     if (redirects > 8) return reject(new UpdateError('リダイレクトが多すぎます'));
     const headers = { 'User-Agent': 'Douga', Accept: '*/*' };
     // 非公開リポジトリは、トークンが無いと 404 になる（403 ではない）
     const token = tokenFor(url);
     if (token) headers.Authorization = `Bearer ${token}`;
+    // 前回と同じ内容なら 304 が返る。304 は GitHub の回数制限に数えられないので、
+    // 「変わっていないことの確認」は何度やっても無料で済む
+    if (etag) headers['If-None-Match'] = etag;
 
     const req = https.get(url, { headers, timeout: 60000 }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          res.resume();
-          return resolve(get(new URL(res.headers.location, url).toString(), redirects + 1));
-        }
-        if (res.statusCode >= 400) {
-          // 本文に GitHub 自身の説明が入っている。読まないと原因が分からない
-          const chunks = [];
-          res.on('data', (chunk) => chunks.push(chunk));
-          res.on('end', () =>
-            reject(describeFailure(res, Buffer.concat(chunks).toString('utf8'))));
-          res.on('error', () => reject(describeFailure(res, '')));
-          return;
-        }
+      if (res.statusCode === 304) {
+        res.resume();
+        return resolve({ status: 304, headers: res.headers, body: null });
+      }
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        const next = new URL(res.headers.location, url).toString();
+        return resolve(get(next, { etag, redirects: redirects + 1 }));
+      }
+      if (res.statusCode >= 400) {
+        // 本文に GitHub 自身の説明が入っている。読まないと原因が分からない
         const chunks = [];
         res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks)));
-        res.on('error', reject);
+        res.on('end', () => reject(describeFailure(res, Buffer.concat(chunks).toString('utf8'))));
+        res.on('error', () => reject(describeFailure(res, '')));
+        return;
+      }
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+      res.on('error', reject);
     });
     req.on('timeout', () => req.destroy(new UpdateError('接続がタイムアウトしました')));
     req.on('error', (err) =>
@@ -172,19 +216,24 @@ function describeFailure(res, body) {
     // 短時間に集中した場合。待つべき秒数が入っている
     const retryAfter = Number(headers['retry-after']);
     if (retryAfter > 0) {
-      return new UpdateError(
+      const error = new UpdateError(
         `短時間に繰り返し問い合わせたため、GitHub に一時的に止められています。${formatWait(retryAfter)}待ってから試してください`
       );
+      error.rateLimitedUntil = Date.now() + retryAfter * 1000;
+      return error;
     }
     // 1 時間あたりの回数制限。残りが 0 なら回復時刻が入っている
     if (headers['x-ratelimit-remaining'] === '0') {
       const reset = Number(headers['x-ratelimit-reset']);
       const seconds = reset ? Math.max(0, reset * 1000 - Date.now()) / 1000 : 0;
-      return new UpdateError(
+      const error = new UpdateError(
         'GitHub の利用制限に達しました（未ログインでは 1 時間あたり 60 回まで）。' +
           (seconds ? `${formatWait(seconds)}待つと回復します` : 'しばらく待ってから試してください') +
           '。設定の「GitHub アクセストークン」を入れると上限が大きくなります'
       );
+      // 回復時刻を覚えておき、それまでは自動確認を控える
+      error.rateLimitedUntil = reset ? reset * 1000 : Date.now() + 60 * 60 * 1000;
+      return error;
     }
     return new UpdateError(
       message ? `GitHub に断られました: ${message}` : 'GitHub に断られました (403)'
@@ -244,15 +293,19 @@ function clearCache() {
 }
 
 /** 配布ブランチの最新コミット */
-async function latest({ fresh = false } = {}) {
+async function latest({ fresh = false, etag = null } = {}) {
   if (!fresh) {
     const remembered = cached('latest');
     if (remembered) return remembered;
   }
   const url = `https://api.github.com/repos/${OWNER}/${REPO}/commits/${BRANCH}`;
+  const res = await get(url, { etag });
+  // 前回から変わっていない。回数制限を消費しない応答
+  if (res.status === 304) return { notModified: true, etag };
+
   let data;
   try {
-    data = JSON.parse((await get(url)).toString('utf8'));
+    data = JSON.parse(res.body.toString('utf8'));
   } catch (err) {
     if (err instanceof UpdateError) throw err;
     throw new UpdateError('GitHub の応答を読めませんでした');
@@ -261,7 +314,8 @@ async function latest({ fresh = false } = {}) {
   const info = {
     sha: data.sha,
     message: ((data.commit && data.commit.message) || '').split('\n')[0],
-    date: (data.commit && data.commit.committer && data.commit.committer.date) || null
+    date: (data.commit && data.commit.committer && data.commit.committer.date) || null,
+    etag: res.headers.etag || null
   };
   cache.at = Date.now();
   cache.latest = info;
@@ -274,9 +328,9 @@ async function fetchTree({ sha = null } = {}) {
   if (sha && cache.sha === sha && cached('tree')) return cache.tree;
   // API 経由なら非公開リポジトリでもトークンで取得できる
   const url = `https://api.github.com/repos/${OWNER}/${REPO}/zipball/${BRANCH}`;
-  const buf = await get(url);
+  const res = await get(url);
   // GitHub の ZIP は全体が「リポジトリ名-ブランチ名/」で包まれている
-  const tree = zip.extract(buf, { strip: 1 });
+  const tree = zip.extract(res.body, { strip: 1 });
   if (sha) {
     cache.at = Date.now();
     cache.sha = sha;
@@ -638,17 +692,56 @@ function applyPatch(dir, name, { root = rootDir(), keep = DEFAULT_KEEP } = {}) {
  * 版が分からない場合（手で ZIP を落とした直後など）は中身を比べる。
  * ここで同じだと分かれば版を記録するので、次回からは軽くなる。
  */
-async function check({ root = rootDir() } = {}) {
+async function check({ root = rootDir(), auto = false } = {}) {
+  const state = readState(root);
+  const now = Date.now();
+
+  // 制限に当たっている間は、自動確認で追い打ちをかけない。
+  // 手動で押されたときは、本人が待てるので通す
+  if (auto && state.rateLimitedUntil && now < state.rateLimitedUntil) {
+    return { skipped: true, reason: 'rate-limited', retryAt: state.rateLimitedUntil };
+  }
+  // 起動のたびに問い合わせる必要はない
+  if (auto && state.checkedAt && now - state.checkedAt < AUTO_INTERVAL_MS) {
+    return { skipped: true, reason: 'recent', checkedAt: state.checkedAt };
+  }
+
   const current = localCommit(root);
-  const newest = await latest();
+
+  let newest;
+  try {
+    const result = await latest({ etag: state.etag });
+    if (result.notModified && state.sha) {
+      // 前回から変わっていない。この応答は回数制限に数えられていない
+      newest = { sha: state.sha, message: state.message || '', date: state.date || null };
+    } else {
+      newest = result;
+      writeState(
+        { etag: result.etag, sha: result.sha, message: result.message, date: result.date },
+        root
+      );
+    }
+  } catch (err) {
+    if (err.rateLimitedUntil) writeState({ rateLimitedUntil: err.rateLimitedUntil }, root);
+    throw err;
+  }
+  writeState({ checkedAt: now, rateLimitedUntil: 0 }, root);
 
   if (current && current === newest.sha) {
     return { upToDate: true, current, latest: newest, changes: null };
   }
 
+  // 同じ版を前回も調べていて、違いが無いと分かっているなら聞き直さない。
+  // 版が不明なまま毎回ソース全体を落とすのが、制限を使い切る一番の原因だった
+  if (state.comparedSha === newest.sha && state.hasUpdate === false) {
+    return { upToDate: true, current: current || newest.sha, latest: newest, changes: null };
+  }
+
   const tree = await fetchTree({ sha: newest.sha });
   const changes = diff(tree, root);
   const hasChanges = changes.changed.length + changes.added.length + changes.removed.length > 0;
+
+  writeState({ comparedSha: newest.sha, hasUpdate: hasChanges }, root);
 
   if (!hasChanges) {
     // 中身は同じ。版だけ記録しておけば次回は通信 1 回で済む
@@ -795,6 +888,11 @@ module.exports = {
   formatWait,
   clearCache,
   CACHE_MS,
+  readState,
+  writeState,
+  statePath,
+  STATE_FILE,
+  AUTO_INTERVAL_MS,
   backupCurrent,
   listVersions,
   pruneVersions,

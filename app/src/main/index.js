@@ -229,9 +229,11 @@ ipcMain.handle('diagnostics:preview', () => diagnostics.report());
  */
 let pendingUpdate = null;
 
-ipcMain.handle('update:check', async () => {
+ipcMain.handle('update:check', async (_event, options = {}) => {
   try {
-    const result = await update.check();
+    const result = await update.check({ auto: !!options.auto });
+    // 回数制限中や、直前に確認済みの場合は問い合わせ自体を省く
+    if (result.skipped) return { ok: true, skipped: true, reason: result.reason };
     pendingUpdate = result.upToDate ? null : { version: result.latest, tree: result.tree };
     return {
       ok: true,

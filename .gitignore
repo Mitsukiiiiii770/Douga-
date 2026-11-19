@@ -9,3 +9,7 @@ Thumbs.db
 # 自動更新が使う作業ファイル（利用者の環境ごとに変わる）
 .douga-version
 app/.deps-stale
+
+# 自動更新が使う作業ファイル
+.douga-update-state.json
+.douga-applied

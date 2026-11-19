@@ -182,6 +182,84 @@ function write(root, relPath, content) {
     say(418, {}, '<html>まさかの HTML</html>')
   );
 
+  group('制限に当たった時刻を覚える');
+  const limitedErr = update.describeFailure(
+    res(403, {
+      'x-ratelimit-remaining': '0',
+      'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 600)
+    }),
+    ''
+  );
+  check(
+    '回復時刻をエラーに持たせる',
+    limitedErr.rateLimitedUntil > Date.now() + 500_000,
+    limitedErr.rateLimitedUntil
+  );
+  const burstErr = update.describeFailure(res(403, { 'retry-after': '30' }), '');
+  check('集中アクセスでも待ち終わりを持たせる', burstErr.rateLimitedUntil > Date.now());
+  check(
+    '普通の失敗には付けない',
+    update.describeFailure(res(500, {}), '').rateLimitedUntil === undefined
+  );
+
+  group('確認結果の保存');
+  const stateRoot = tempRoot();
+  check('最初は空', Object.keys(update.readState(stateRoot)).length === 0);
+  update.writeState({ etag: 'W/"abc"', sha: 'a'.repeat(40) }, stateRoot);
+  check('書いた内容が読める', update.readState(stateRoot).etag === 'W/"abc"');
+  update.writeState({ checkedAt: 123 }, stateRoot);
+  check('一部だけ更新しても他は残る', update.readState(stateRoot).etag === 'W/"abc"');
+  check('追記した値も読める', update.readState(stateRoot).checkedAt === 123);
+  fs.writeFileSync(update.statePath(stateRoot), 'これは JSON ではない');
+  check('壊れていても落ちない', Object.keys(update.readState(stateRoot)).length === 0);
+
+  group('無駄な問い合わせをしない');
+  // 通信すると失敗するので、省略された場合だけ成功する
+  const skipRoot = tempRoot();
+  update.writeState({ rateLimitedUntil: Date.now() + 600_000 }, skipRoot);
+  const whileLimited = await update.check({ root: skipRoot, auto: true });
+  check('制限中の自動確認は問い合わせない', whileLimited.skipped === true);
+  check('理由が分かる', whileLimited.reason === 'rate-limited', whileLimited.reason);
+
+  const recentRoot = tempRoot();
+  update.writeState({ checkedAt: Date.now() - 60_000, rateLimitedUntil: 0 }, recentRoot);
+  const tooSoon = await update.check({ root: recentRoot, auto: true });
+  check('直前に確認済みなら問い合わせない', tooSoon.skipped === true);
+  check('理由が分かる', tooSoon.reason === 'recent', tooSoon.reason);
+
+  const oldRoot = tempRoot();
+  update.writeState(
+    { checkedAt: Date.now() - update.AUTO_INTERVAL_MS - 1000, rateLimitedUntil: 0 },
+    oldRoot
+  );
+  let reached = false;
+  try {
+    await update.check({ root: oldRoot, auto: true });
+  } catch {
+    // 通信に出たということ。この環境では失敗して当然
+    reached = true;
+  }
+  check('間隔が空いていれば確認しに行く', reached, '6 時間経てば自動確認が動く');
+
+  check(
+    '制限中でも手動なら試す',
+    await (async () => {
+      const manualRoot = tempRoot();
+      update.writeState({ rateLimitedUntil: Date.now() + 600_000 }, manualRoot);
+      try {
+        const r = await update.check({ root: manualRoot, auto: false });
+        return !r.skipped;
+      } catch {
+        return true;
+      }
+    })(),
+    '本人が押したなら待てるはずなので通す'
+  );
+
+  for (const dir of [stateRoot, skipRoot, recentRoot, oldRoot]) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   group('待ち時間の表し方');
   check('1 分未満は秒', update.formatWait(45) === '約 45 秒');
   check('端数は切り上げる', update.formatWait(44.2) === '約 45 秒');

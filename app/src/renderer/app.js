@@ -936,7 +936,9 @@ async function checkUpdate({ quiet = false } = {}) {
   $('update-apply').hidden = true;
   $('update-details').hidden = true;
   try {
-    const result = await api.update.check();
+    const result = await api.update.check({ auto: quiet });
+    // 直前に確認済み・制限中は、黙って何もしない
+    if (result.skipped) return;
     if (!result.ok) {
       // 起動時の自動確認では、繋がらないだけで驚かせない
       if (!quiet) updateStatus(result.error, true);
