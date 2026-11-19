@@ -129,27 +129,14 @@ function get(url, redirects = 0) {
           res.resume();
           return resolve(get(new URL(res.headers.location, url).toString(), redirects + 1));
         }
-        if (res.statusCode === 403 && /rate limit/i.test(res.headers['x-ratelimit-remaining'] || '')) {
-          res.resume();
-          return reject(new UpdateError('GitHub の利用制限に達しました。しばらく待ってから試してください'));
-        }
-        if (res.statusCode === 404) {
-          res.resume();
-          return reject(
-            new UpdateError(
-              settings.get().githubToken
-                ? '見つかりませんでした。アクセストークンの権限（Contents: Read）を確認してください'
-                : 'リポジトリが非公開のため取得できません。公開するか、設定の「GitHub アクセストークン」を入力してください'
-            )
-          );
-        }
-        if (res.statusCode === 401) {
-          res.resume();
-          return reject(new UpdateError('アクセストークンが無効です。入力し直してください'));
-        }
-        if (res.statusCode !== 200) {
-          res.resume();
-          return reject(new UpdateError(`取得に失敗しました (HTTP ${res.statusCode})`));
+        if (res.statusCode >= 400) {
+          // 本文に GitHub 自身の説明が入っている。読まないと原因が分からない
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () =>
+            reject(describeFailure(res, Buffer.concat(chunks).toString('utf8'))));
+          res.on('error', () => reject(describeFailure(res, '')));
+          return;
         }
         const chunks = [];
         res.on('data', (chunk) => chunks.push(chunk));
@@ -163,8 +150,105 @@ function get(url, redirects = 0) {
   });
 }
 
+/**
+ * 失敗した応答から、利用者に意味の分かる説明を作る。
+ *
+ * 以前は HTTP の番号をそのまま出していたため、
+ * 「取得に失敗しました (HTTP 403)」としか分からなかった。
+ * 403 は利用制限・権限不足・短時間の集中アクセスで出るが、
+ * どれなのかは応答の中身を読まないと区別できない。
+ */
+function describeFailure(res, body) {
+  const code = res.statusCode;
+  const headers = res.headers || {};
+  let message = '';
+  try {
+    message = (JSON.parse(body).message || '').trim();
+  } catch {
+    /* JSON でなければ本文は使わない */
+  }
+
+  if (code === 403 || code === 429) {
+    // 短時間に集中した場合。待つべき秒数が入っている
+    const retryAfter = Number(headers['retry-after']);
+    if (retryAfter > 0) {
+      return new UpdateError(
+        `短時間に繰り返し問い合わせたため、GitHub に一時的に止められています。${formatWait(retryAfter)}待ってから試してください`
+      );
+    }
+    // 1 時間あたりの回数制限。残りが 0 なら回復時刻が入っている
+    if (headers['x-ratelimit-remaining'] === '0') {
+      const reset = Number(headers['x-ratelimit-reset']);
+      const seconds = reset ? Math.max(0, reset * 1000 - Date.now()) / 1000 : 0;
+      return new UpdateError(
+        'GitHub の利用制限に達しました（未ログインでは 1 時間あたり 60 回まで）。' +
+          (seconds ? `${formatWait(seconds)}待つと回復します` : 'しばらく待ってから試してください') +
+          '。設定の「GitHub アクセストークン」を入れると上限が大きくなります'
+      );
+    }
+    return new UpdateError(
+      message ? `GitHub に断られました: ${message}` : 'GitHub に断られました (403)'
+    );
+  }
+
+  if (code === 404) {
+    return new UpdateError(
+      settingsToken()
+        ? '見つかりませんでした。アクセストークンの権限（Contents: Read）を確認してください'
+        : 'リポジトリが見つかりません。非公開の場合は、公開するか設定の「GitHub アクセストークン」を入力してください'
+    );
+  }
+  if (code === 401) return new UpdateError('アクセストークンが無効です。入力し直してください');
+  if (code >= 500) return new UpdateError(`GitHub 側で問題が起きています (${code})。時間をおいて試してください`);
+
+  return new UpdateError(message ? `取得に失敗しました: ${message}` : `取得に失敗しました (HTTP ${code})`);
+}
+
+function settingsToken() {
+  try {
+    return (settings.get().githubToken || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** 待ち時間を読みやすく */
+function formatWait(seconds) {
+  const total = Math.ceil(seconds);
+  if (total < 60) return `約 ${total} 秒`;
+  return `約 ${Math.ceil(total / 60)} 分`;
+}
+
+/**
+ * 直前の問い合わせ結果を短時間だけ覚えておく。
+ *
+ * 未ログインの GitHub API は 1 時間に 60 回までしか使えない。
+ * 「更新を確認」を続けて押したり、起動のたびに確認したりすると
+ * すぐ使い切ってしまい、本来の更新まで巻き添えで止まる。
+ * 少し前に聞いた答えは使い回す。
+ */
+const CACHE_MS = 5 * 60 * 1000;
+const cache = { at: 0, latest: null, tree: null, sha: null };
+
+function cached(key) {
+  if (Date.now() - cache.at > CACHE_MS) return null;
+  return cache[key];
+}
+
+/** 覚えている内容を捨てる。利用者が明示的にやり直したいとき用 */
+function clearCache() {
+  cache.at = 0;
+  cache.latest = null;
+  cache.tree = null;
+  cache.sha = null;
+}
+
 /** 配布ブランチの最新コミット */
-async function latest() {
+async function latest({ fresh = false } = {}) {
+  if (!fresh) {
+    const remembered = cached('latest');
+    if (remembered) return remembered;
+  }
   const url = `https://api.github.com/repos/${OWNER}/${REPO}/commits/${BRANCH}`;
   let data;
   try {
@@ -174,20 +258,31 @@ async function latest() {
     throw new UpdateError('GitHub の応答を読めませんでした');
   }
   if (!data || !data.sha) throw new UpdateError('更新情報を取得できませんでした');
-  return {
+  const info = {
     sha: data.sha,
     message: ((data.commit && data.commit.message) || '').split('\n')[0],
     date: (data.commit && data.commit.committer && data.commit.committer.date) || null
   };
+  cache.at = Date.now();
+  cache.latest = info;
+  return info;
 }
 
 /** ソース一式を取ってきて展開する */
-async function fetchTree() {
+async function fetchTree({ sha = null } = {}) {
+  // 同じ版なら落とし直さない。ソースの取得も回数制限に数えられる
+  if (sha && cache.sha === sha && cached('tree')) return cache.tree;
   // API 経由なら非公開リポジトリでもトークンで取得できる
   const url = `https://api.github.com/repos/${OWNER}/${REPO}/zipball/${BRANCH}`;
   const buf = await get(url);
   // GitHub の ZIP は全体が「リポジトリ名-ブランチ名/」で包まれている
-  return zip.extract(buf, { strip: 1 });
+  const tree = zip.extract(buf, { strip: 1 });
+  if (sha) {
+    cache.at = Date.now();
+    cache.sha = sha;
+    cache.tree = tree;
+  }
+  return tree;
 }
 
 /* ---------------- 比較 ---------------- */
@@ -551,7 +646,7 @@ async function check({ root = rootDir() } = {}) {
     return { upToDate: true, current, latest: newest, changes: null };
   }
 
-  const tree = await fetchTree();
+  const tree = await fetchTree({ sha: newest.sha });
   const changes = diff(tree, root);
   const hasChanges = changes.changed.length + changes.added.length + changes.removed.length > 0;
 
@@ -696,6 +791,10 @@ module.exports = {
   STALE_DEPS_FILE,
   TOKEN_HOSTS,
   tokenFor,
+  describeFailure,
+  formatWait,
+  clearCache,
+  CACHE_MS,
   backupCurrent,
   listVersions,
   pruneVersions,

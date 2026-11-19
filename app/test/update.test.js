@@ -142,6 +142,52 @@ function write(root, relPath, content) {
     '黙って飛ばすのではなく例外にする'
   );
 
+  group('失敗の説明');
+  // 実際に「取得に失敗しました (HTTP 403)」としか出ず、原因が分からなかった。
+  // 403 は利用制限・権限不足・集中アクセスで出るので、区別して伝える
+  const res = (statusCode, headers = {}) => ({ statusCode, headers });
+  const say = (code, headers, body = '') => update.describeFailure(res(code, headers), body).message;
+
+  const limited = say(403, {
+    'x-ratelimit-remaining': '0',
+    'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 1800)
+  });
+  check('回数制限だと分かる', /利用制限/.test(limited), limited);
+  check('何回まで使えるかを伝える', /60 回/.test(limited), limited);
+  check('いつ回復するかを伝える', /約 30 分/.test(limited), limited);
+  check('上限を上げる方法も伝える', /トークン/.test(limited), limited);
+
+  const burst = say(403, { 'retry-after': '45' });
+  check('集中アクセスだと分かる', /繰り返し/.test(burst), burst);
+  check('待つ秒数を伝える', /約 45 秒/.test(burst), burst);
+
+  const refused = say(403, {}, JSON.stringify({ message: 'Resource not accessible' }));
+  check(
+    '理由が他にあれば GitHub の説明をそのまま見せる',
+    /Resource not accessible/.test(refused),
+    refused
+  );
+  check(
+    '残り回数があるなら制限とは言わない',
+    !/利用制限/.test(say(403, { 'x-ratelimit-remaining': '42' })),
+    say(403, { 'x-ratelimit-remaining': '42' })
+  );
+
+  check('404 は非公開の可能性を伝える', /非公開/.test(say(404, {})), say(404, {}));
+  check('401 はトークンが無効だと伝える', /トークン/.test(say(401, {})));
+  check('500 番台は GitHub 側の問題だと伝える', /GitHub 側/.test(say(503, {})), say(503, {}));
+  check(
+    '本文が JSON でなくても落ちない',
+    /HTTP 418/.test(say(418, {}, '<html>まさかの HTML</html>')),
+    say(418, {}, '<html>まさかの HTML</html>')
+  );
+
+  group('待ち時間の表し方');
+  check('1 分未満は秒', update.formatWait(45) === '約 45 秒');
+  check('端数は切り上げる', update.formatWait(44.2) === '約 45 秒');
+  check('1 分以上は分', update.formatWait(90) === '約 2 分');
+  check('0 でも壊れない', update.formatWait(0) === '約 0 秒');
+
   group('アクセストークンの送り先');
   const secret = 'ghp_dummy_for_test';
   check(
