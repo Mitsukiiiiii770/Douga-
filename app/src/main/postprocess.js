@@ -111,11 +111,33 @@ function buildFfmpegArgs(input, output, cfg) {
   // 音声は触らない。再エンコードすると純粋に劣化するだけ
   args.push('-c:a', 'copy');
   // 字幕やチャプターも維持する
-  args.push('-c:s', 'copy', '-map', '0');
+  args.push('-c:s', 'copy');
+
+  // どのストリームを通すかを明示する。
+  //
+  // 以前は -map 0 で「入力の全部」を指定していたが、これだと
+  // 埋め込みサムネイル（カバーアート）も映像として扱われ、
+  // フィルタと再エンコードの対象になって ffmpeg ごと落ちていた
+  // （画面には "Conversion failed!" としか出ない）。
+  //
+  // 大文字の V は「添付画像を除く映像」を指す。これで本編だけを拾える。
+  args.push('-map', '0:V:0');
+  // ? を付けると、無い場合に失敗しない
+  args.push('-map', '0:a?');
+  args.push('-map', '0:s?');
+  if (supportsAttachments(output)) {
+    // mkv は字幕用フォントなどを添付として持てる。mp4 は持てないので付けない
+    args.push('-map', '0:t?', '-c:t', 'copy');
+  }
 
   args.push('-progress', 'pipe:1');
   args.push(output);
   return args;
+}
+
+/** 添付ストリーム（フォント等）を持てる入れ物か */
+function supportsAttachments(filePath) {
+  return /\.(mkv|mka|webm)$/i.test(String(filePath || ''));
 }
 
 /** 出力ファイル名。元ファイルは残し、別名で書き出す */
@@ -199,6 +221,14 @@ function runFfmpeg(args, { onProgress, duration, signal } = {}) {
   });
 }
 
+/**
+ * ffmpeg の出力から、利用者に意味の通る説明を作る。
+ *
+ * ffmpeg は失敗すると最後に必ず "Conversion failed!" と出す。
+ * 以前は最終行をそのまま見せていたため、どの動画で失敗しても
+ * 同じ文言しか出ず、原因が全く分からなかった。
+ * 本当の理由はその手前の行にあるので、そちらを探す。
+ */
 function friendlyError(lines) {
   const text = lines.join('\n');
   if (/No such filter|Unknown filter/i.test(text)) {
@@ -208,8 +238,35 @@ function friendlyError(lines) {
     return '指定したエンコーダがこの ffmpeg に含まれていません。別のエンコーダを選んでください。';
   }
   if (/No space left/i.test(text)) return 'ディスクの空き容量が足りません。';
-  const last = lines[lines.length - 1];
-  return last || '後処理に失敗しました。';
+  if (/Permission denied/i.test(text)) return 'ファイルに書き込めません。保存先の権限を確認してください。';
+  if (/Invalid data found/i.test(text)) return '元の動画を読み取れません。ダウンロードが壊れている可能性があります。';
+  if (/could not find tag|Could not write header/i.test(text)) {
+    return 'この形式では保存できない音声・字幕が含まれています。保存形式を mkv にすると通ることがあります。';
+  }
+  if (/Filtergraph .* was (specified|defined)/i.test(text)) {
+    return 'フィルタを適用できないストリームがあります。';
+  }
+
+  return meaningfulError(lines) || '後処理に失敗しました。';
+}
+
+/** 締めの決まり文句ではなく、原因を述べている行を探す */
+function meaningfulError(lines) {
+  const noise =
+    /^(Conversion failed|Error while filtering|Press \[q\]|frame=|size=|video:|\[.*\] Error (sending|submitting))/i;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = String(lines[i]).trim();
+    if (!line || noise.test(line)) continue;
+    if (/error|invalid|unable|unsupported|no such|cannot|could not|failed|denied/i.test(line)) {
+      return line;
+    }
+  }
+  // それらしい行が無ければ、決まり文句以外の最後の行
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = String(lines[i]).trim();
+    if (line && !noise.test(line)) return line;
+  }
+  return '';
 }
 
 /**
@@ -359,6 +416,9 @@ module.exports = {
   presetList,
   buildFilterChain,
   buildFfmpegArgs,
+  friendlyError,
+  meaningfulError,
+  supportsAttachments,
   outputPathFor,
   parseProgress,
   process,

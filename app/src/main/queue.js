@@ -8,6 +8,7 @@ const { app } = require('electron');
 const engine = require('./engine');
 const hls = require('./hls');
 const postprocess = require('./postprocess');
+const diagnostics = require('./diagnostics');
 const cookies = require('./cookies');
 const settings = require('./settings');
 
@@ -273,6 +274,16 @@ class Queue extends EventEmitter {
         } catch (err) {
           if (err && err.canceled) throw err;
           job.postProcessError = err.message;
+          // ffmpeg の出力を検出ログに残す。高画質化の失敗は実機でしか
+          // 再現しないので、これが無いと原因を追えない
+          try {
+            diagnostics.note(
+              `高画質化に失敗: ${err.message}` +
+                (err.detail ? `\n--- ffmpeg の出力 ---\n${err.detail}` : '')
+            );
+          } catch {
+            /* 記録できなくてもダウンロード自体は成功している */
+          }
         }
       }
 

@@ -117,5 +117,71 @@ function valueOf(args, flag) {
   check('拡大倍率を持つ', presets.find((p) => p.id === 'upscale2x').scale === 2);
   check('等倍プリセットは scale 1', presets.find((p) => p.id === 'restore').scale === 1);
 
+  group('通すストリームを明示する');
+  // -map 0 で全部を対象にすると、埋め込みサムネイル（カバーアート）まで
+  // 映像として再エンコードされ、ffmpeg が落ちる。画面には
+  // "Conversion failed!" としか出ず、原因が分からなかった
+  const mkvArgs = postprocess.buildFfmpegArgs('/in.mkv', '/out.mkv', baseCfg);
+  const joined = mkvArgs.join(' ');
+
+  check('入力を丸ごと指定しない', !/-map 0(?= |$)/.test(joined), joined);
+  check('本編の映像だけを拾う', joined.includes('-map 0:V:0'), '大文字 V は添付画像を除く映像');
+  check('音声は無くても失敗しない', joined.includes('-map 0:a?'));
+  check('字幕は無くても失敗しない', joined.includes('-map 0:s?'));
+  check('mkv なら添付も引き継ぐ', joined.includes('-map 0:t?') && joined.includes('-c:t copy'));
+  check('音声は再エンコードしない', joined.includes('-c:a copy'));
+
+  const mp4Args = postprocess.buildFfmpegArgs('/in.mp4', '/out.mp4', baseCfg).join(' ');
+  check(
+    'mp4 には添付を付けない',
+    !mp4Args.includes('-map 0:t?'),
+    'mp4 は添付を持てないので、付けると書き出しごと失敗する'
+  );
+
+  check('mkv は添付を持てる', postprocess.supportsAttachments('/a/b.mkv'));
+  check('webm も持てる', postprocess.supportsAttachments('x.WEBM'));
+  check('mp4 は持てない', !postprocess.supportsAttachments('x.mp4'));
+  check('空でも落ちない', !postprocess.supportsAttachments(null));
+
+  group('失敗の本当の理由を拾う');
+  // ffmpeg は失敗すると必ず最後に "Conversion failed!" と出す。
+  // 最終行をそのまま見せると、どの失敗でも同じ文言になってしまう
+  const say = (lines) => postprocess.friendlyError(lines);
+
+  check(
+    '締めの決まり文句は見せない',
+    say(['[libx264 @ 0x1] Invalid level', 'Conversion failed!']) !== 'Conversion failed!',
+    say(['[libx264 @ 0x1] Invalid level', 'Conversion failed!'])
+  );
+  check(
+    '手前の原因を拾う',
+    /Invalid level/.test(say(['[libx264 @ 0x1] Invalid level', 'Conversion failed!']))
+  );
+  check(
+    '進捗行は原因として扱わない',
+    /No such file/.test(say(['Error opening output: No such file', 'frame= 10 fps=5', 'Conversion failed!'])),
+    say(['Error opening output: No such file', 'frame= 10 fps=5', 'Conversion failed!'])
+  );
+  check(
+    '書き込めない場合を説明する',
+    /権限/.test(say(['[out] Permission denied', 'Conversion failed!']))
+  );
+  check(
+    '壊れた動画を説明する',
+    /壊れている/.test(say(['[mkv @ 0x1] Invalid data found when processing input']))
+  );
+  check(
+    '入れ物に収まらない場合を説明する',
+    /mkv/.test(say(['[mp4 @ 0x1] Could not write header for output file'])),
+    say(['[mp4 @ 0x1] Could not write header for output file'])
+  );
+  check('既知のフィルタ誤りは従来どおり', /フィルタ/.test(say(['No such filter: hqdn3dx'])));
+  check('空でも文言を返す', say([]) === '後処理に失敗しました。');
+  check(
+    '決まり文句しか無ければ既定の文言',
+    say(['Conversion failed!']) === '後処理に失敗しました。',
+    say(['Conversion failed!'])
+  );
+
   done('postprocess');
 })();
