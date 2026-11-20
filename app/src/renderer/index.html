@@ -138,7 +138,21 @@
           ここで動画を再生すると、配信 URL を自動で見つけます。ログインが必要なサイトは、この中でログインしてください。
         </p>
         <div class="browse-view">
-          <webview id="browse-view" src="about:blank" allowpopups></webview>
+          <!--
+            partition は HTML に書いておく必要がある。
+            webview は DOM に入った時点で読み込みを始めるため、
+            後から JavaScript で指定しても無視される。
+            指定が効かないと、盗聴用の session と実際に使う session が
+            食い違い、動画の検出もログイン状態の保存もできなくなる。
+            値は app/src/main/browse.js の PARTITION と一致させること
+            （browse.test.js で照合している）。
+          -->
+          <webview
+            id="browse-view"
+            partition="persist:douga-browse"
+            src="about:blank"
+            allowpopups
+          ></webview>
         </div>
       </section>
 

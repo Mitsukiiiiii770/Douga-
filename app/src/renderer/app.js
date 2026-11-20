@@ -729,8 +729,18 @@ function browseView() {
 
 async function initBrowse() {
   const view = browseView();
-  // 盗聴用の session と同じ区画を使う。ログイン状態もここに残る
-  view.partition = await api.browse.partition();
+
+  // 区画は HTML 側で指定済み。ここで代入しても webview は既に読み込みを
+  // 始めており、無視される（以前それで検出もログイン保存も効いていなかった）。
+  // 取り違えが起きていないかだけ確かめる
+  const expected = await api.browse.partition();
+  if (view.getAttribute('partition') !== expected) {
+    console.error(
+      `ブラウザの区画が一致しません（HTML: ${view.getAttribute('partition')} / アプリ: ${expected}）。` +
+        '動画の検出とログイン状態の保存が効きません。'
+    );
+  }
+
   browseState.metaScript = await api.browse.metaScript();
 
   const syncUrl = () => {
