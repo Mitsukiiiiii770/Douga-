@@ -603,6 +603,13 @@ function buildSortFields(cfg) {
 /** 再エンコードが発生する = 音質が落ちる形式 */
 const LOSSY_AUDIO = ['mp3', 'aac', 'opus', 'vorbis'];
 
+/**
+ * aria2c の接続数。
+ * 増やすほど速いとは限らず、配信側に拒否されることもある。
+ * 16 は実用上よく使われ、受け入れられやすい値。
+ */
+const ARIA2_CONNECTIONS = 16;
+
 /** 最終ファイルを探すときに試す拡張子 */
 const MEDIA_EXTS = [
   '.mkv', '.mp4', '.webm', '.mov', '.m4v', '.flv', '.avi',
@@ -731,6 +738,19 @@ function buildDownloadArgs(job, cfg, { pathFile } = {}) {
     '-S',
     buildSortFields(cfg).join(',')
   ];
+
+  // aria2c があれば使う。
+  //
+  // yt-dlp 内蔵のダウンローダは 1 本の接続で順に取るが、aria2c は
+  // 1 ファイルを複数の接続に分けて同時に取れる。回線に余裕があるほど
+  // 差が出るので、入っているなら使わない理由がない。
+  // 入っていなければ黙って従来どおりに動く。
+  const aria2 = cfg.useAria2 === false ? null : binaries.aria2c();
+  if (aria2) {
+    args.push('--downloader', aria2);
+    // -x: 1 サーバーあたりの接続数 / -s: 分割数 / -k: 分割の最小単位
+    args.push('--downloader-args', `aria2c:-x${ARIA2_CONNECTIONS} -s${ARIA2_CONNECTIONS} -k1M`);
+  }
 
   if (job.mode === 'audio') {
     const format = job.audioFormat || 'best';
@@ -861,6 +881,7 @@ module.exports = {
   buildDownloadArgs,
   resolveOutputPath,
   MEDIA_EXTS,
+  ARIA2_CONNECTIONS,
   normalizeFormats,
   tokenizeArgs
 };

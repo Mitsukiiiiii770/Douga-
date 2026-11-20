@@ -140,14 +140,16 @@ ipcMain.handle('settings:chooseDir', async () => {
 const BINARY_SETTING_KEYS = {
   ffmpeg: 'ffmpegPath',
   ytdlp: 'ytdlpPath',
-  realesrgan: 'realesrganPath'
+  realesrgan: 'realesrganPath',
+  aria2c: 'aria2cPath'
 };
 
 ipcMain.handle('settings:chooseBinary', async (_event, which) => {
   const titles = {
     ffmpeg: 'ffmpeg の実行ファイルを選択',
     ytdlp: 'yt-dlp の実行ファイルを選択',
-    realesrgan: 'Real-ESRGAN の実行ファイルを選択'
+    realesrgan: 'Real-ESRGAN の実行ファイルを選択',
+    aria2c: 'aria2c の実行ファイルを選択'
   };
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
@@ -446,7 +448,8 @@ ipcMain.handle('binaries:install', async (_event, which) => {
   // 未知の値で黙って yt-dlp を入れてしまわないよう、明示的に振り分ける
   const installers = {
     ffmpeg: binaries.installFfmpeg,
-    ytdlp: binaries.installYtdlp
+    ytdlp: binaries.installYtdlp,
+    aria2c: binaries.installAria2c
   };
   const install = installers[which];
   if (!install) throw new Error(`自動インストールに対応していません: ${which}`);

@@ -28,6 +28,9 @@ const DEFAULTS = {
   postCrf: 18,
   postFrameRate: 30,
   realesrganPath: '',
+  aria2cPath: '',
+  // aria2c があれば使う。1 本の動画を複数の接続に分けて取るので速い
+  useAria2: true,
   // 起動時に更新を確認する。既定は有効（手で ZIP を落とす手間を無くすのが目的のため）
   autoUpdateCheck: true,
   // 更新が見つかったら、確認を待たずに適用する（反映は再起動時）

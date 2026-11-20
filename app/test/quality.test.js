@@ -132,5 +132,36 @@ const formats = [
   check('同解像度・同fps なら HDR', sorted[1].id === 'd', sorted.map((f) => f.id));
   check('HDR 情報を保持する', sorted[1].dynamicRange === 'HDR10', sorted[1]);
 
+  group('aria2c があれば使う');
+  // yt-dlp 内蔵のダウンローダは 1 本の接続で順に取る。
+  // aria2c は 1 ファイルを複数の接続に分けて同時に取れるので速い
+  const binaries = require('../src/main/binaries');
+  const realAria = binaries.aria2c;
+
+  binaries.aria2c = () => 'C:\\bin\\aria2c.exe';
+  const withAria = engine
+    .buildDownloadArgs({ url: 'https://x/v', outDir: '/out' }, { downloadDir: '/out', useAria2: true })
+    .join(' ');
+  check('ダウンローダとして渡す', withAria.includes('--downloader C:\\bin\\aria2c.exe'), withAria);
+  check('接続数を指定する', /aria2c:-x16 -s16 -k1M/.test(withAria), withAria);
+
+  const disabled = engine
+    .buildDownloadArgs({ url: 'https://x/v', outDir: '/out' }, { downloadDir: '/out', useAria2: false })
+    .join(' ');
+  check('設定で切れる', !disabled.includes('--downloader'), disabled);
+
+  binaries.aria2c = () => null;
+  const without = engine
+    .buildDownloadArgs({ url: 'https://x/v', outDir: '/out' }, { downloadDir: '/out', useAria2: true })
+    .join(' ');
+  check(
+    '入っていなければ何も足さない',
+    !without.includes('--downloader'),
+    '任意のものなので、無くても従来どおり動く'
+  );
+  check('その場合も URL は最後', without.endsWith('https://x/v'));
+
+  binaries.aria2c = realAria;
+
   done('quality');
 })();

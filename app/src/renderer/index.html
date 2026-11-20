@@ -308,6 +308,21 @@
               <button class="ghost" data-choose="ffmpeg">手動で選ぶ</button>
             </div>
           </div>
+          <div class="binary-row" id="aria2c-row">
+            <div>
+              <strong>aria2c</strong>
+              <span class="status" id="aria2c-status">確認中…</span>
+              <code id="aria2c-path"></code>
+            </div>
+            <div class="row">
+              <button class="ghost" data-install="aria2c">自動インストール</button>
+              <button class="ghost" data-choose="aria2c">手動で選ぶ</button>
+            </div>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="use-aria2" />
+            <span>aria2c があれば使う（分割して同時に取るため速くなります）</span>
+          </label>
           <p class="muted" id="install-progress" hidden></p>
         </div>
 

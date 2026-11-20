@@ -514,6 +514,7 @@ async function loadSettings() {
   $('open-at-login').checked = !!s.openAtLogin;
   $('max-tabs').value = s.maxBrowseTabs || 5;
   $('browse-home-page').value = s.browseHomePage === undefined ? '' : s.browseHomePage;
+  $('use-aria2').checked = s.useAria2 !== false;
   // トークンが要る状況でだけ開いておく
   $('update-token-box').open = !!s.githubToken;
   renderClients(s.pairedClients);
@@ -623,10 +624,13 @@ $('post-custom').addEventListener('input', renderPostNote);
 async function refreshBinaries() {
   const status = await api.binaries.status();
 
-  const esrgan = status.realesrgan || { ok: false, path: null };
-  $('realesrgan-status').textContent = esrgan.ok ? '検出済み' : '未検出（任意）';
-  $('realesrgan-status').className = `status ${esrgan.ok ? 'ok' : ''}`;
-  $('realesrgan-path').textContent = esrgan.path || '';
+  // 任意のもの。無くても動くので、未検出でも赤くしない
+  for (const which of ['realesrgan', 'aria2c']) {
+    const item = status[which] || { ok: false, path: null };
+    $(`${which}-status`).textContent = item.ok ? '検出済み' : '未検出（任意）';
+    $(`${which}-status`).className = `status ${item.ok ? 'ok' : ''}`;
+    $(`${which}-path`).textContent = item.path || '';
+  }
 
   for (const which of ['ytdlp', 'ffmpeg']) {
     const item = status[which];
@@ -1372,6 +1376,10 @@ $('open-at-login').addEventListener('change', async (event) => {
     $('shortcut-status').classList.add('error');
     $('shortcut-status').textContent = 'この環境では自動起動を設定できませんでした。';
   }
+});
+
+$('use-aria2').addEventListener('change', async (event) => {
+  await api.settings.set({ useAria2: event.target.checked });
 });
 
 $('browse-home-page').addEventListener('change', async (event) => {

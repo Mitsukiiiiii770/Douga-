@@ -20,6 +20,16 @@ const YTDLP_URL = IS_WIN
 const FFMPEG_ZIP_URL =
   'https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip';
 
+/**
+ * aria2c。任意だが、入れると取得が目に見えて速くなる。
+ *
+ * yt-dlp 内蔵のダウンローダは 1 本の接続で順に取る。aria2c は
+ * 1 ファイルを複数の接続に分けて同時に取れるため、
+ * 回線に余裕があるほど差が出る。
+ */
+const ARIA2_ZIP_URL =
+  'https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip';
+
 /** 同梱 bin ディレクトリ（開発時は app/bin、配布時は resources/bin） */
 function binDir() {
   const packed = app.isPackaged
@@ -75,6 +85,10 @@ function ffmpeg() {
 }
 
 /** 任意インストール。無くても ffmpeg ベースの後処理は使える */
+function aria2c() {
+  return resolveBinary('aria2c', settings.get().aria2cPath);
+}
+
 function realesrgan() {
   return (
     resolveBinary('realesrgan-ncnn-vulkan', settings.get().realesrganPath) ||
@@ -174,6 +188,8 @@ async function status({ fresh = false } = {}) {
     ffmpeg: { path: f, version: fv ? fv.replace(/^ffmpeg version /, '') : null, ok: !!fv },
     // 任意。無くても ffmpeg ベースの後処理は使えるので、バージョン確認まではしない
     realesrgan: { path: r, version: null, ok: !!r, optional: true },
+    // 任意。無くても取得はできるが、あると速い
+    aria2c: { path: aria2c(), version: null, ok: !!aria2c(), optional: true },
     platform: process.platform
   };
 }
@@ -273,6 +289,34 @@ async function installYtdlp(onProgress) {
 /**
  * ffmpeg を取得。Windows のみ自動対応（zip 展開）。
  */
+async function installAria2c(onProgress) {
+  if (!IS_WIN) {
+    throw new Error(
+      'aria2c の自動インストールは Windows のみ対応しています。macOS は `brew install aria2`、Linux は各ディストリのパッケージからインストールしてください。'
+    );
+  }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'douga-aria2-'));
+  const zip = path.join(tmp, 'aria2.zip');
+  await download(ARIA2_ZIP_URL, zip, (received, total) =>
+    onProgress && onProgress({ stage: 'aria2c', received, total })
+  );
+  onProgress && onProgress({ stage: 'aria2c-extract' });
+  await unzipWindows(zip, tmp);
+
+  const found = findFileRecursive(tmp, 'aria2c.exe');
+  if (!found) throw new Error('aria2c.exe が展開結果に見つかりませんでした');
+  fs.mkdirSync(userBinDir(), { recursive: true });
+  const dest = path.join(userBinDir(), 'aria2c.exe');
+  fs.copyFileSync(found, dest);
+
+  try {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  } catch { /* 一時ディレクトリの削除失敗は無視 */ }
+
+  settings.set({ aria2cPath: dest });
+  return dest;
+}
+
 async function installFfmpeg(onProgress) {
   if (!IS_WIN) {
     throw new Error(
@@ -311,6 +355,8 @@ module.exports = {
   status,
   installYtdlp,
   installFfmpeg,
+  installAria2c,
+  aria2c,
   userBinDir,
   binDir
 };
