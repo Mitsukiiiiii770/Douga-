@@ -61,6 +61,27 @@ const appJs = fs.readFileSync(path.join(RENDERER, 'app.js'), 'utf8');
   check('アプリ側が区画名を公開している', typeof browse.partition === 'function');
   check('公開している値が定数と一致する', browse.partition() === browse.PARTITION);
 
+  group('最初のページ');
+  const settings = require('../src/main/settings');
+  check(
+    '既定は Google',
+    settings.DEFAULTS.browseHomePage === 'https://www.google.com',
+    settings.DEFAULTS.browseHomePage
+  );
+  check('設定で変えられる', 'browseHomePage' in settings.DEFAULTS);
+  check('新しいタブでも開く', /const target = url === null \? browseState\.homePage/.test(appJs));
+  check(
+    '空にすれば白紙のまま',
+    /if \(target\) navigateBrowse\(target\)/.test(appJs),
+    '最初のページを出したくない人もいる'
+  );
+  check('ホームへ戻るボタンがある', /browse-home'\)\.addEventListener/.test(appJs));
+  check(
+    'HTML の webview は about:blank のまま',
+    /src="about:blank"/.test(html),
+    '区画を確実に効かせるため、移動は読み込み後に行う'
+  );
+
   group('タブごとに仕分ける');
   // 同じ区画の webview は通信の監視を共有するため、webContents の id で
   // 分けないと、別のタブで再生した動画が混ざって取り込まれる

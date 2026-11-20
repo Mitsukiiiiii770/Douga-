@@ -41,7 +41,9 @@ const DEFAULTS = {
   // PC の起動時にアプリを開く
   openAtLogin: false,
   // アプリ内ブラウザで一度に開けるタブの数
-  maxBrowseTabs: 5
+  maxBrowseTabs: 5,
+  // アプリ内ブラウザを開いたときに表示するページ
+  browseHomePage: 'https://www.google.com'
 };
 
 let cache = null;

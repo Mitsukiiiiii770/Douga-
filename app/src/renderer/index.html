@@ -125,6 +125,7 @@
           <button id="browse-back" class="ghost small" title="戻る">←</button>
           <button id="browse-forward" class="ghost small" title="進む">→</button>
           <button id="browse-reload" class="ghost small" title="再読み込み">⟳</button>
+          <button id="browse-home" class="ghost small" title="最初のページへ">⌂</button>
           <input
             id="browse-url"
             type="text"
@@ -188,6 +189,10 @@
           <label class="field">
             <span>ブラウザのタブ数の上限</span>
             <input type="number" id="max-tabs" min="1" max="12" />
+          </label>
+          <label class="field">
+            <span>ブラウザの最初のページ</span>
+            <input type="url" id="browse-home-page" placeholder="https://www.google.com" spellcheck="false" />
           </label>
           <p class="muted">
             「Douga起動.bat」から開くと黒いコンソール窓が残ります。

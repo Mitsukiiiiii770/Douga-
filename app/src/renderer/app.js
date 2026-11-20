@@ -513,6 +513,7 @@ async function loadSettings() {
   $('keep-versions').value = s.keepVersions === undefined ? 3 : s.keepVersions;
   $('open-at-login').checked = !!s.openAtLogin;
   $('max-tabs').value = s.maxBrowseTabs || 5;
+  $('browse-home-page').value = s.browseHomePage === undefined ? '' : s.browseHomePage;
   // トークンが要る状況でだけ開いておく
   $('update-token-box').open = !!s.githubToken;
   renderClients(s.pairedClients);
@@ -724,7 +725,7 @@ api.bridge.onPaired(async () => {
  * 配信 URL の盗聴・Cookie の取得・ページ情報の読み取りが自前でできる。
  * ここでログインした情報は、普段使いのブラウザとは別に保存される。
  */
-const browseState = { metaScript: null, maxTabs: 5 };
+const browseState = { metaScript: null, maxTabs: 5, homePage: 'https://www.google.com' };
 
 /**
  * 開いているタブ。
@@ -759,7 +760,7 @@ function makeWebview(partition) {
   return view;
 }
 
-function createTab({ url = '', view = null } = {}) {
+function createTab({ url = null, view = null } = {}) {
   const cfg = browseTabs.length ? browseState.maxTabs : Infinity;
   if (browseTabs.length >= cfg) return null;
 
@@ -779,7 +780,9 @@ function createTab({ url = '', view = null } = {}) {
   browseTabs.push(tab);
   wireTab(tab);
   activateTab(tab);
-  if (url) navigateBrowse(url);
+  // 白紙から始めると何をすればよいか分かりにくいので、最初のページを開く
+  const target = url === null ? browseState.homePage : url;
+  if (target) navigateBrowse(target);
   return tab;
 }
 
@@ -901,7 +904,9 @@ async function initBrowse() {
 
   browseState.metaScript = await api.browse.metaScript();
   try {
-    browseState.maxTabs = (await api.settings.get()).maxBrowseTabs || 5;
+    const cfg = await api.settings.get();
+    browseState.maxTabs = cfg.maxBrowseTabs || 5;
+    if (cfg.browseHomePage !== undefined) browseState.homePage = cfg.browseHomePage;
   } catch {
     /* 既定のままでよい */
   }
@@ -978,6 +983,9 @@ $('browse-forward').addEventListener('click', () => {
 $('browse-reload').addEventListener('click', () => {
   const view = browseView();
   if (view) view.reload();
+});
+$('browse-home').addEventListener('click', () => {
+  if (browseState.homePage) navigateBrowse(browseState.homePage);
 });
 
 $('browse-capture').addEventListener('click', async () => {
@@ -1364,6 +1372,12 @@ $('open-at-login').addEventListener('change', async (event) => {
     $('shortcut-status').classList.add('error');
     $('shortcut-status').textContent = 'この環境では自動起動を設定できませんでした。';
   }
+});
+
+$('browse-home-page').addEventListener('change', async (event) => {
+  const value = event.target.value.trim();
+  browseState.homePage = value;
+  await api.settings.set({ browseHomePage: value });
 });
 
 $('max-tabs').addEventListener('change', async (event) => {
