@@ -29,21 +29,26 @@ contextBridge.exposeInMainWorld('douga', {
     onCapture: listen('capture:incoming')
   },
   binaries: {
-    status: () => ipcRenderer.invoke('binaries:status'),
+    status: (options) => ipcRenderer.invoke('binaries:status', options),
     install: (which) => ipcRenderer.invoke('binaries:install', which),
     onProgress: listen('binaries:progress')
   },
   browse: {
     partition: () => ipcRenderer.invoke('browse:partition'),
     metaScript: () => ipcRenderer.invoke('browse:metaScript'),
-    state: () => ipcRenderer.invoke('browse:state'),
-    reset: (url) => ipcRenderer.invoke('browse:reset', url),
+    state: (id) => ipcRenderer.invoke('browse:state', id),
+    reset: (info) => ipcRenderer.invoke('browse:reset', info),
     setPage: (info) => ipcRenderer.invoke('browse:setPage', info),
+    forget: (id) => ipcRenderer.invoke('browse:forget', id),
     cookies: (urls) => ipcRenderer.invoke('browse:cookies', urls),
     clearData: () => ipcRenderer.invoke('browse:clearData'),
     onUpdate: listen('browse:update'),
     // 埋め込みブラウザからのログインを拒否するサイトか
     loginBlock: (url) => loginBlocks.loginBlock(url)
+  },
+  app: {
+    restart: () => ipcRenderer.invoke('app:restart'),
+    openAtLogin: (enabled) => ipcRenderer.invoke('app:openAtLogin', enabled)
   },
   diagnostics: {
     // 観測した通信と判断の理由を書き出す

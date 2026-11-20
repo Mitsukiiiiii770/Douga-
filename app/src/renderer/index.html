@@ -137,7 +137,10 @@
         <p class="hint" id="browse-status">
           ここで動画を再生すると、配信 URL を自動で見つけます。ログインが必要なサイトは、この中でログインしてください。
         </p>
-        <div class="browse-view">
+        <div class="browse-tabs" id="browse-tabs">
+          <button id="browse-newtab" class="tab-add" title="新しいタブ">＋</button>
+        </div>
+        <div class="browse-view" id="browse-host">
           <!--
             partition は HTML に書いておく必要がある。
             webview は DOM に入った時点で読み込みを始めるため、
@@ -175,6 +178,17 @@
 
         <div class="setting-group">
           <h3>起動</h3>
+          <div class="row">
+            <button id="app-restart" class="ghost">アプリを再起動</button>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="open-at-login" />
+            <span>PC の起動時に Douga を開く</span>
+          </label>
+          <label class="field">
+            <span>ブラウザのタブ数の上限</span>
+            <input type="number" id="max-tabs" min="1" max="12" />
+          </label>
           <p class="muted">
             「Douga起動.bat」から開くと黒いコンソール窓が残ります。
             下のボタンでデスクトップにショートカットを作ると、窓を出さずに開けます。

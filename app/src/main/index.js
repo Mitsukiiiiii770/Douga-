@@ -22,6 +22,8 @@ const probeControllers = new Map();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
+    // 用意ができるまで出さない。先に出すと白い画面が一瞬見える
+    show: false,
     width: 1080,
     height: 760,
     minWidth: 860,
@@ -43,6 +45,8 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+
+  mainWindow.once('ready-to-show', () => mainWindow.show());
 
   // 外部リンクは既定のブラウザで開く
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -172,14 +176,18 @@ ipcMain.handle('bridge:regenerateToken', async () => {
 
 ipcMain.handle('browse:partition', () => browse.partition());
 ipcMain.handle('browse:metaScript', () => pageMetaScript.SOURCE);
-ipcMain.handle('browse:state', () => browse.state());
-ipcMain.handle('browse:reset', (_event, url) => {
-  browse.reset(url || '');
-  return browse.state();
+ipcMain.handle('browse:state', (_event, id) => browse.state(id));
+ipcMain.handle('browse:forget', (_event, id) => {
+  browse.forget(id);
+  return true;
 });
-ipcMain.handle('browse:setPage', (_event, { url, title }) => {
-  browse.setPage(url, title);
-  return browse.state();
+ipcMain.handle('browse:reset', (_event, { id, url } = {}) => {
+  browse.reset(id, url || '');
+  return browse.state(id);
+});
+ipcMain.handle('browse:setPage', (_event, { id, url, title } = {}) => {
+  browse.setPage(id, url, title);
+  return browse.state(id);
 });
 ipcMain.handle('browse:cookies', (_event, urls) => browse.cookiesFor(urls || []));
 ipcMain.handle('browse:clearData', () => browse.clearData());
@@ -264,6 +272,37 @@ ipcMain.handle('update:apply', async () => {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+});
+
+/**
+ * PC の起動時にアプリを開く設定。
+ *
+ * npm start で動かしている場合、実行ファイルは electron 本体なので、
+ * アプリの場所を引数で渡さないと「Electron の既定アプリ」が開いてしまう。
+ */
+function applyLoginItem(enabled) {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return false;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: !!enabled,
+      path: process.execPath,
+      args: app.isPackaged ? [] : [app.getAppPath()]
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+ipcMain.handle('app:openAtLogin', (_event, enabled) => {
+  settings.set({ openAtLogin: !!enabled });
+  return applyLoginItem(enabled);
+});
+
+ipcMain.handle('app:restart', () => {
+  app.relaunch();
+  app.exit(0);
+  return true;
 });
 
 ipcMain.handle('update:restart', () => {
@@ -356,7 +395,7 @@ ipcMain.handle('diagnostics:reset', () => {
   return true;
 });
 
-ipcMain.handle('binaries:status', () => binaries.status());
+ipcMain.handle('binaries:status', (_event, options = {}) => binaries.status(options));
 
 ipcMain.handle('postprocess:presets', () => postprocess.presetList());
 
@@ -459,14 +498,28 @@ ipcMain.handle('shell:openExternal', async (_event, url) => {
 /* ---------------- ライフサイクル ---------------- */
 
 app.whenReady().then(async () => {
-  cookies.clearAll();
+  // Windows がこのアプリを 1 つのものとして扱うために要る。
+  // これが無いとタスクバーへの固定が electron.exe として扱われ、
+  // 固定したアイコンから起動できないことがある
+  if (process.platform === 'win32') app.setAppUserModelId('com.douga.app');
+
   // アプリ内ブラウザの監視を始める（拡張機能なしで動かすための経路）
   browse.attach();
   // 前回のキューを読み込む（実行中だったものは「中断」になる）
   queue.restore();
   createWindow();
-  await bridge.start();
-  send('bridge:status', bridge.status());
+
+  // ここから先は画面が出てからでよい。起動を待たせない
+  setImmediate(async () => {
+    cookies.clearAll();
+    try {
+      await bridge.start();
+      send('bridge:status', bridge.status());
+    } catch {
+      /* 連携が始まらなくても、アプリ単体では使える */
+    }
+    applyLoginItem(settings.get().openAtLogin);
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

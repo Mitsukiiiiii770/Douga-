@@ -22,15 +22,41 @@ const PARTITION = 'persist:douga-browse';
 /** 1 ページあたりに覚えておく候補の上限 */
 const MAX_CANDIDATES = 60;
 
+/** タブ 1 つ分の状態 */
+function emptyTab() {
+  return {
+    candidates: new Map(),
+    headers: {},
+    pageUrl: '',
+    pageTitle: '',
+    segments: 0
+  };
+}
+
 class Browser extends EventEmitter {
   constructor() {
     super();
     this.attached = false;
-    this.candidates = new Map();
-    this.headers = {};
-    this.pageUrl = '';
-    this.pageTitle = '';
-    this.segments = 0;
+    /**
+     * タブごとの状態。鍵は webContents の id。
+     *
+     * 同じ区画の webview は webRequest を共有するため、どのタブの通信かは
+     * details.webContentsId でしか見分けられない。1 つにまとめて持つと、
+     * 別のタブで再生した動画が混ざって取り込まれてしまう。
+     */
+    this.tabs = new Map();
+  }
+
+  /** 指定タブの状態。無ければ作る */
+  tab(id) {
+    const key = id == null ? 0 : id;
+    if (!this.tabs.has(key)) this.tabs.set(key, emptyTab());
+    return this.tabs.get(key);
+  }
+
+  /** タブを閉じたときに忘れる */
+  forget(id) {
+    this.tabs.delete(id == null ? 0 : id);
   }
 
   partition() {
@@ -51,12 +77,13 @@ class Browser extends EventEmitter {
 
     // 動画配信は Referer を見て弾くサイトが多いので、送られている値を控える
     ses.webRequest.onSendHeaders({ urls: ['<all_urls>'] }, (details) => {
+      const tab = this.tab(details.webContentsId);
       const headers = details.requestHeaders || {};
       for (const [name, value] of Object.entries(headers)) {
         const key = name.toLowerCase();
-        if (key === 'referer' && !this.headers.referer) this.headers.referer = value;
-        if (key === 'user-agent') this.headers.userAgent = value;
-        if (key === 'origin' && !this.headers.origin) this.headers.origin = value;
+        if (key === 'referer' && !tab.headers.referer) tab.headers.referer = value;
+        if (key === 'user-agent') tab.headers.userAgent = value;
+        if (key === 'origin' && !tab.headers.origin) tab.headers.origin = value;
       }
     });
 
@@ -72,12 +99,13 @@ class Browser extends EventEmitter {
 
   inspect(details) {
     const url = details.url;
+    const tab = this.tab(details.webContentsId);
     if (detect.isSegment(url)) {
-      this.segments++;
+      tab.segments++;
       diagnostics.segment();
       // 最初の数件だけは残す。マニフェストを取りこぼしたとき、
       // セグメントの URL からどこに置かれているか分かる
-      if (this.segments <= 3) {
+      if (tab.segments <= 3) {
         diagnostics.observe({
           url,
           resourceType: details.resourceType || '',
@@ -116,18 +144,19 @@ class Browser extends EventEmitter {
     diagnostics.observe({ url, mime, size, resourceType: details.resourceType || '', kind, reason });
     if (!kind) return;
 
-    this.record(url, kind, size);
+    this.record(details.webContentsId, url, kind, size);
   }
 
-  record(url, kind, size) {
-    if (this.candidates.has(url)) {
-      const existing = this.candidates.get(url);
+  record(id, url, kind, size) {
+    const tab = this.tab(id);
+    if (tab.candidates.has(url)) {
+      const existing = tab.candidates.get(url);
       if (size && !existing.size) existing.size = size;
       return;
     }
-    if (this.candidates.size >= MAX_CANDIDATES) return;
+    if (tab.candidates.size >= MAX_CANDIDATES) return;
 
-    this.candidates.set(url, {
+    tab.candidates.set(url, {
       url,
       kind,
       size: size || null,
@@ -135,35 +164,39 @@ class Browser extends EventEmitter {
       noise: detect.isNoise(url),
       seenAt: Date.now()
     });
-    this.emit('update', this.state());
+    this.emit('update', { id, ...this.state(id) });
   }
 
   /** ページ遷移のたびに呼ぶ。前のページの候補を引きずらないため */
-  reset(pageUrl = '') {
-    this.candidates.clear();
-    this.headers = {};
-    this.segments = 0;
-    this.pageUrl = pageUrl;
-    this.pageTitle = '';
-    this.emit('update', this.state());
+  reset(id, pageUrl = '') {
+    const tab = this.tab(id);
+    tab.candidates.clear();
+    tab.headers = {};
+    tab.segments = 0;
+    tab.pageUrl = pageUrl;
+    tab.pageTitle = '';
+    this.emit('update', { id, ...this.state(id) });
   }
 
-  setPage(url, title) {
-    if (url) this.pageUrl = url;
-    if (title) this.pageTitle = title;
+  setPage(id, url, title) {
+    const tab = this.tab(id);
+    if (url) tab.pageUrl = url;
+    if (title) tab.pageTitle = title;
   }
 
-  state() {
+  state(id) {
+    const tab = this.tab(id);
     // マニフェストを先に、広告などは最後に
     const rank = (c) => {
       if (c.noise) return -1e15 + (c.size || 0);
       return (c.kind === 'hls' || c.kind === 'dash' ? 1e12 : 0) + (c.size || 0);
     };
     return {
-      pageUrl: this.pageUrl,
-      pageTitle: this.pageTitle,
-      segments: this.segments,
-      candidates: [...this.candidates.values()].sort((a, b) => rank(b) - rank(a))
+      pageUrl: tab.pageUrl,
+      pageTitle: tab.pageTitle,
+      segments: tab.segments,
+      headers: tab.headers,
+      candidates: [...tab.candidates.values()].sort((a, b) => rank(b) - rank(a))
     };
   }
 
@@ -203,7 +236,7 @@ class Browser extends EventEmitter {
   /** アプリ内ブラウザのログイン情報を消す */
   async clearData() {
     await this.browseSession().clearStorageData();
-    this.reset(this.pageUrl);
+    for (const id of [...this.tabs.keys()]) this.reset(id, this.tab(id).pageUrl);
   }
 }
 

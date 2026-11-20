@@ -92,11 +92,83 @@ function version(bin, args = ['--version']) {
   });
 }
 
-async function status() {
+/**
+ * 調べたバージョンを覚えておく。
+ *
+ * 起動のたびに yt-dlp と ffmpeg を実際に起動して --version を
+ * 聞いていた。Windows ではプロセスの起動とウイルス対策のスキャンで
+ * 1 本あたり数秒かかることがあり、これが起動の遅さの主因だった。
+ *
+ * 実行ファイルが変わっていなければ答えも変わらないので、
+ * 場所・更新日時・大きさが同じなら前回の答えを使う。
+ */
+function fingerprint(bin) {
+  if (!bin) return null;
+  try {
+    const stat = fs.statSync(bin);
+    return `${bin}|${stat.mtimeMs}|${stat.size}`;
+  } catch {
+    return null;
+  }
+}
+
+function cacheFile() {
+  return path.join(app.getPath('userData'), 'binaries-cache.json');
+}
+
+function readCache() {
+  try {
+    const data = JSON.parse(fs.readFileSync(cacheFile(), 'utf8'));
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCache(next) {
+  try {
+    fs.writeFileSync(cacheFile(), JSON.stringify(next, null, 2), 'utf8');
+  } catch {
+    /* 書けなければ毎回調べ直すだけ */
+  }
+}
+
+/**
+ * 覚えている答えが使えるなら使い、だめなら実際に聞く。
+ * @param {boolean} fresh true なら必ず聞き直す
+ */
+async function versionCached(bin, args, cache, key, fresh) {
+  const mark = fingerprint(bin);
+  if (!mark) return { value: null, mark: null };
+  if (!fresh && cache[key] && cache[key].mark === mark) {
+    return { value: cache[key].value, mark, hit: true };
+  }
+  return { value: await version(bin, args), mark };
+}
+
+/**
+ * @param {{fresh?: boolean}} [options] fresh:true で実行ファイルを調べ直す
+ */
+async function status({ fresh = false } = {}) {
   const y = ytdlp();
   const f = ffmpeg();
   const r = realesrgan();
-  const [yv, fv] = await Promise.all([version(y), version(f, ['-version'])]);
+
+  const cache = readCache();
+  const [yr, fr] = await Promise.all([
+    versionCached(y, ['--version'], cache, 'ytdlp', fresh),
+    versionCached(f, ['-version'], cache, 'ffmpeg', fresh)
+  ]);
+  const yv = yr.value;
+  const fv = fr.value;
+
+  if (!yr.hit || !fr.hit) {
+    writeCache({
+      ...cache,
+      ytdlp: { mark: yr.mark, value: yv },
+      ffmpeg: { mark: fr.mark, value: fv }
+    });
+  }
   return {
     ytdlp: { path: y, version: yv, ok: !!yv },
     ffmpeg: { path: f, version: fv ? fv.replace(/^ffmpeg version /, '') : null, ok: !!fv },

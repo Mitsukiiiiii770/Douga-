@@ -35,7 +35,11 @@ const DEFAULTS = {
   // GitHub を経由せず、手元のフォルダに置いたパッチから更新する場合の置き場
   patchDir: '',
   // 更新前の状態を何世代残すか
-  keepVersions: 3
+  keepVersions: 3,
+  // PC の起動時にアプリを開く
+  openAtLogin: false,
+  // アプリ内ブラウザで一度に開けるタブの数
+  maxBrowseTabs: 5
 };
 
 let cache = null;

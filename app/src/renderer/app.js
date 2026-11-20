@@ -510,6 +510,8 @@ async function loadSettings() {
   $('update-auto').checked = s.autoUpdateCheck !== false;
   $('github-token').value = s.githubToken || '';
   $('keep-versions').value = s.keepVersions === undefined ? 3 : s.keepVersions;
+  $('open-at-login').checked = !!s.openAtLogin;
+  $('max-tabs').value = s.maxBrowseTabs || 5;
   // トークンが要る状況でだけ開いておく
   $('update-token-box').open = !!s.githubToken;
   renderClients(s.pairedClients);
@@ -721,70 +723,210 @@ api.bridge.onPaired(async () => {
  * 配信 URL の盗聴・Cookie の取得・ページ情報の読み取りが自前でできる。
  * ここでログインした情報は、普段使いのブラウザとは別に保存される。
  */
-const browseState = { candidates: [], pageUrl: '', metaScript: null, loginBlock: null };
+const browseState = { metaScript: null, maxTabs: 5 };
 
+/**
+ * 開いているタブ。
+ *
+ * 同じ区画の webview は通信の監視を共有するので、どのタブの通信かは
+ * webContents の id でしか見分けられない。アプリ側もその id で
+ * 候補を仕分けているため、タブごとに id を控えておく。
+ */
+const browseTabs = [];
+let activeTab = null;
+
+function browseHost() {
+  return $('browse-host');
+}
+
+/** 今見えているタブの webview。まだ無ければ null */
 function browseView() {
-  return $('browse-view');
+  return activeTab ? activeTab.view : null;
+}
+
+/**
+ * 新しい webview を作る。
+ *
+ * partition は DOM に入れる前に指定する必要がある。入れた後では
+ * 読み込みが始まっていて無視され、監視もログイン保存も効かなくなる。
+ */
+function makeWebview(partition) {
+  const view = document.createElement('webview');
+  view.setAttribute('partition', partition);
+  view.setAttribute('allowpopups', '');
+  view.setAttribute('src', 'about:blank');
+  return view;
+}
+
+function createTab({ url = '', view = null } = {}) {
+  const cfg = browseTabs.length ? browseState.maxTabs : Infinity;
+  if (browseTabs.length >= cfg) return null;
+
+  const first = $('browse-view');
+  const partition = first ? first.getAttribute('partition') : 'persist:douga-browse';
+  const element = view || makeWebview(partition);
+  if (!view) browseHost().appendChild(element);
+
+  const tab = {
+    view: element,
+    wcId: null,
+    title: '新しいタブ',
+    url: '',
+    candidates: [],
+    loginBlock: null
+  };
+  browseTabs.push(tab);
+  wireTab(tab);
+  activateTab(tab);
+  if (url) navigateBrowse(url);
+  return tab;
+}
+
+function wireTab(tab) {
+  const view = tab.view;
+
+  // id はアタッチ後でないと取れない
+  view.addEventListener('dom-ready', () => {
+    try {
+      tab.wcId = view.getWebContentsId();
+    } catch {
+      /* 取れなければ仕分けできないが、表示自体は動く */
+    }
+  });
+
+  view.addEventListener('did-start-navigation', (event) => {
+    if (!event.isMainFrame) return;
+    tab.url = event.url;
+    tab.candidates = [];
+    // Google などは埋め込みブラウザからのログインを拒否する。
+    // 何も出ないとアプリの不具合に見えるので、理由をその場で伝える
+    tab.loginBlock = api.browse.loginBlock(event.url);
+    api.browse.reset({ id: tab.wcId, url: event.url });
+    if (tab === activeTab) {
+      syncUrlBar();
+      renderBrowseStatus();
+    }
+  });
+
+  const syncUrl = () => {
+    try {
+      tab.url = view.getURL();
+    } catch {
+      /* 読み込み前は取れない */
+    }
+    if (tab === activeTab) syncUrlBar();
+  };
+  view.addEventListener('did-navigate', syncUrl);
+  view.addEventListener('did-navigate-in-page', syncUrl);
+
+  view.addEventListener('page-title-updated', (event) => {
+    tab.title = event.title || tab.title;
+    api.browse.setPage({ id: tab.wcId, url: tab.url, title: event.title });
+    renderTabs();
+  });
+}
+
+function activateTab(tab) {
+  activeTab = tab;
+  for (const other of browseTabs) other.view.hidden = other !== tab;
+  renderTabs();
+  syncUrlBar();
+  renderBrowseStatus();
+}
+
+function closeTab(tab) {
+  const index = browseTabs.indexOf(tab);
+  if (index < 0) return;
+  // 最後の 1 枚は閉じない。閉じると操作できなくなる
+  if (browseTabs.length === 1) {
+    navigateBrowse('about:blank');
+    return;
+  }
+  if (tab.wcId != null) api.browse.forget(tab.wcId);
+  tab.view.remove();
+  browseTabs.splice(index, 1);
+  activateTab(browseTabs[Math.min(index, browseTabs.length - 1)]);
+}
+
+function renderTabs() {
+  const bar = $('browse-tabs');
+  for (const node of [...bar.querySelectorAll('.browse-tab')]) node.remove();
+
+  const add = $('browse-newtab');
+  for (const tab of browseTabs) {
+    const item = document.createElement('div');
+    item.className = `browse-tab${tab === activeTab ? ' is-active' : ''}`;
+
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = tab.title || '新しいタブ';
+    label.addEventListener('click', () => activateTab(tab));
+    item.appendChild(label);
+
+    const close = document.createElement('button');
+    close.className = 'close';
+    close.textContent = '×';
+    close.title = 'タブを閉じる';
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeTab(tab);
+    });
+    item.appendChild(close);
+
+    bar.insertBefore(item, add);
+  }
+  add.disabled = browseTabs.length >= browseState.maxTabs;
+}
+
+function syncUrlBar() {
+  const url = activeTab ? activeTab.url : '';
+  if (url && url !== 'about:blank') $('browse-url').value = url;
+  else if (activeTab) $('browse-url').value = '';
 }
 
 async function initBrowse() {
-  const view = browseView();
+  const first = $('browse-view');
 
   // 区画は HTML 側で指定済み。ここで代入しても webview は既に読み込みを
   // 始めており、無視される（以前それで検出もログイン保存も効いていなかった）。
   // 取り違えが起きていないかだけ確かめる
   const expected = await api.browse.partition();
-  if (view.getAttribute('partition') !== expected) {
+  if (first.getAttribute('partition') !== expected) {
     console.error(
-      `ブラウザの区画が一致しません（HTML: ${view.getAttribute('partition')} / アプリ: ${expected}）。` +
+      `ブラウザの区画が一致しません（HTML: ${first.getAttribute('partition')} / アプリ: ${expected}）。` +
         '動画の検出とログイン状態の保存が効きません。'
     );
   }
 
   browseState.metaScript = await api.browse.metaScript();
+  try {
+    browseState.maxTabs = (await api.settings.get()).maxBrowseTabs || 5;
+  } catch {
+    /* 既定のままでよい */
+  }
 
-  const syncUrl = () => {
-    const url = view.getURL();
-    if (url && url !== 'about:blank') $('browse-url').value = url;
-  };
-
-  // ページが変わったら前のページの候補を捨てる
-  view.addEventListener('did-start-navigation', (event) => {
-    if (event.isMainFrame) {
-      api.browse.reset(event.url);
-      browseState.candidates = [];
-      // Google などは埋め込みブラウザからのログインを拒否する。
-      // 何も出ないとアプリの不具合に見えるので、理由をその場で伝える
-      browseState.loginBlock = api.browse.loginBlock(event.url);
-      renderBrowseStatus();
-    }
-  });
-
-  view.addEventListener('did-navigate', syncUrl);
-  view.addEventListener('did-navigate-in-page', syncUrl);
-  view.addEventListener('page-title-updated', (event) => {
-    api.browse.setPage({ url: view.getURL(), title: event.title });
-  });
+  createTab({ view: first });
 
   // 候補は随時増えるので、定期的に取り直す
   setInterval(async () => {
     if (!document.querySelector('.panel[data-panel="browse"]').classList.contains('is-active')) {
       return;
     }
-    const state = await api.browse.state();
-    browseState.candidates = state.candidates || [];
-    browseState.pageUrl = state.pageUrl || view.getURL();
+    if (!activeTab) return;
+    const state = await api.browse.state(activeTab.wcId);
+    activeTab.candidates = state.candidates || [];
     renderBrowseStatus();
   }, 1000);
 }
 
 function renderBrowseStatus() {
-  const usable = browseState.candidates.filter((c) => !c.noise).length;
+  const candidates = activeTab ? activeTab.candidates : [];
+  const usable = candidates.filter((c) => !c.noise).length;
   const status = $('browse-status');
 
   // ログインできない理由は、動画の件数より先に伝える
-  if (browseState.loginBlock) {
-    status.textContent = browseState.loginBlock.note;
+  if (activeTab && activeTab.loginBlock) {
+    status.textContent = activeTab.loginBlock.note;
     status.classList.remove('is-ready');
     status.classList.add('is-warn');
     return;
@@ -804,14 +946,21 @@ function renderBrowseStatus() {
 function navigateBrowse(input) {
   const raw = (input || '').trim();
   if (!raw) return;
+  const view = browseView();
+  if (!view) return;
   // URL に見えなければ検索として扱う
   const target = /^https?:\/\//i.test(raw)
     ? raw
     : /^[\w-]+(\.[\w-]+)+/.test(raw)
       ? `https://${raw}`
       : `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`;
-  browseView().loadURL(target);
+  view.loadURL(target);
 }
+
+$('browse-newtab').addEventListener('click', () => {
+  const tab = createTab();
+  if (tab) $('browse-url').focus();
+});
 
 $('browse-go').addEventListener('click', () => navigateBrowse($('browse-url').value));
 $('browse-url').addEventListener('keydown', (event) => {
@@ -819,20 +968,24 @@ $('browse-url').addEventListener('keydown', (event) => {
 });
 $('browse-back').addEventListener('click', () => {
   const view = browseView();
-  if (view.canGoBack()) view.goBack();
+  if (view && view.canGoBack()) view.goBack();
 });
 $('browse-forward').addEventListener('click', () => {
   const view = browseView();
-  if (view.canGoForward()) view.goForward();
+  if (view && view.canGoForward()) view.goForward();
 });
-$('browse-reload').addEventListener('click', () => browseView().reload());
+$('browse-reload').addEventListener('click', () => {
+  const view = browseView();
+  if (view) view.reload();
+});
 
 $('browse-capture').addEventListener('click', async () => {
   const button = $('browse-capture');
+  const view = browseView();
+  if (!view) return;
   button.disabled = true;
   button.textContent = '取り込み中…';
   try {
-    const view = browseView();
     const pageUrl = view.getURL();
 
     // ページから読み取れるタイトル・サムネ・尺。保存名に使う
@@ -843,7 +996,8 @@ $('browse-capture').addEventListener('click', async () => {
       /* 読めなくても候補だけで進める */
     }
 
-    const state = await api.browse.state();
+    // 今見ているタブの分だけを取り込む
+    const state = await api.browse.state(activeTab ? activeTab.wcId : null);
     const candidates = state.candidates || [];
     const cookies = await api.browse.cookies([pageUrl, ...candidates.map((c) => c.url)]);
 
@@ -1095,6 +1249,24 @@ setTimeout(async () => {
  * 流れになるためコンソール窓が残り続ける。Electron 本体を直接起動する
  * ショートカットを作れば窓は出ない。
  */
+$('app-restart').addEventListener('click', () => api.app.restart());
+
+$('open-at-login').addEventListener('change', async (event) => {
+  const ok = await api.app.openAtLogin(event.target.checked);
+  if (!ok) {
+    event.target.checked = false;
+    $('shortcut-status').hidden = false;
+    $('shortcut-status').classList.add('error');
+    $('shortcut-status').textContent = 'この環境では自動起動を設定できませんでした。';
+  }
+});
+
+$('max-tabs').addEventListener('change', async (event) => {
+  const value = Math.max(1, Math.min(12, Number(event.target.value) || 5));
+  event.target.value = value;
+  await api.settings.set({ maxBrowseTabs: value });
+});
+
 $('make-shortcut').addEventListener('click', async (event) => {
   const button = event.currentTarget;
   const status = $('shortcut-status');

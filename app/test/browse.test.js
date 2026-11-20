@@ -61,6 +61,51 @@ const appJs = fs.readFileSync(path.join(RENDERER, 'app.js'), 'utf8');
   check('アプリ側が区画名を公開している', typeof browse.partition === 'function');
   check('公開している値が定数と一致する', browse.partition() === browse.PARTITION);
 
+  group('タブごとに仕分ける');
+  // 同じ区画の webview は通信の監視を共有するため、webContents の id で
+  // 分けないと、別のタブで再生した動画が混ざって取り込まれる
+  browse.reset(11, 'https://a.example/watch');
+  browse.reset(22, 'https://b.example/watch');
+  browse.record(11, 'https://a.example/a.mp4', 'file', 9e6);
+  browse.record(22, 'https://b.example/b.mp4', 'file', 8e6);
+  browse.record(22, 'https://b.example/c.m3u8', 'hls', null);
+
+  check('タブ A は自分の分だけ', browse.state(11).candidates.length === 1, browse.state(11).candidates.length);
+  check('タブ B も自分の分だけ', browse.state(22).candidates.length === 2);
+  check(
+    '別のタブの動画が混ざらない',
+    !browse.state(11).candidates.some((c) => c.url.includes('b.example')),
+    '混ざると関係ない動画を取り込んでしまう'
+  );
+  check('ページ URL もタブごと', browse.state(11).pageUrl === 'https://a.example/watch');
+  check('知らないタブは空', browse.state(999).candidates.length === 0);
+
+  browse.reset(11, 'https://a.example/next');
+  check('片方を消しても他方は残る', browse.state(22).candidates.length === 2);
+  check('消した側は空になる', browse.state(11).candidates.length === 0);
+
+  browse.forget(22);
+  check('閉じたタブは忘れる', browse.state(22).candidates.length === 0);
+
+  check('同じ URL は重複しない', (() => {
+    browse.record(33, 'https://x.example/v.mp4', 'file', 1e6);
+    browse.record(33, 'https://x.example/v.mp4', 'file', 2e6);
+    return browse.state(33).candidates.length === 1;
+  })());
+  check(
+    '後から分かった大きさを拾う',
+    (() => {
+      browse.record(44, 'https://y.example/v.mp4', 'file', null);
+      browse.record(44, 'https://y.example/v.mp4', 'file', 5e6);
+      return browse.state(44).candidates[0].size === 5e6;
+    })()
+  );
+  check(
+    'マニフェストを先に並べる',
+    browse.state(22).candidates.length === 0 ||
+      browse.state(22).candidates[0].kind === 'hls'
+  );
+
   group('ログインを拒否されるサイトの案内');
   // Google は 2019 年以降、埋め込みブラウザからのログインを
   // フィッシング対策として拒否する。理由が出ないとアプリの不具合に見える
@@ -100,7 +145,8 @@ const appJs = fs.readFileSync(path.join(RENDERER, 'app.js'), 'utf8');
   );
 
   group('画面に出す経路');
-  check('案内を表示する分岐がある', /browseState\.loginBlock/.test(appJs));
+  check('タブごとに覚える', /tab\.loginBlock\s*=/.test(appJs), '別のタブの案内が残らないように');
+  check('案内を表示する分岐がある', /\.loginBlock\b/.test(appJs));
   check('移動のたびに判定する', /api\.browse\.loginBlock\(/.test(appJs));
 
   done('browse');
