@@ -2,6 +2,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 const loginBlocks = require('../shared/login-blocks');
+const shortcutsShared = require('../shared/shortcuts');
 
 /**
  * レンダラーに公開する API。nodeIntegration は無効なので、
@@ -40,6 +41,19 @@ contextBridge.exposeInMainWorld('douga', {
     reset: (info) => ipcRenderer.invoke('browse:reset', info),
     setPage: (info) => ipcRenderer.invoke('browse:setPage', info),
     forget: (id) => ipcRenderer.invoke('browse:forget', id),
+    visit: (info) => ipcRenderer.invoke('browse:visit', info),
+    titleKnown: (info) => ipcRenderer.invoke('browse:titleKnown', info),
+    history: (options) => ipcRenderer.invoke('browse:history', options),
+    historyRemove: (url) => ipcRenderer.invoke('browse:historyRemove', url),
+    historyClear: () => ipcRenderer.invoke('browse:historyClear'),
+    bookmarks: () => ipcRenderer.invoke('browse:bookmarks'),
+    bookmarkToggle: (info) => ipcRenderer.invoke('browse:bookmarkToggle', info),
+    bookmarkRemove: (url) => ipcRenderer.invoke('browse:bookmarkRemove', url),
+    isBookmarked: (url) => ipcRenderer.invoke('browse:isBookmarked', url),
+    onOpenTab: listen('browse:open-tab'),
+    onShortcut: listen('browse:shortcut'),
+    // 画面側にフォーカスがあるときは、こちらで判定する
+    shortcutFor: (event) => shortcutsShared.fromDom(event),
     cookies: (urls) => ipcRenderer.invoke('browse:cookies', urls),
     clearData: () => ipcRenderer.invoke('browse:clearData'),
     onUpdate: listen('browse:update'),

@@ -12,6 +12,8 @@ const bridge = require('./bridge');
 const cookies = require('./cookies');
 const postprocess = require('./postprocess');
 const browse = require('./browse');
+const browseStore = require('./browse-store');
+const shortcuts = require('../shared/shortcuts');
 const diagnostics = require('./diagnostics');
 const update = require('./update');
 const pageMetaScript = require('../shared/page-meta-script');
@@ -52,6 +54,25 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // アプリ内ブラウザの中で「新しいタブで開く」リンクを踏んだとき。
+  // 既定のブラウザへ投げてしまうと、ログイン状態も監視も引き継げない
+  mainWindow.webContents.on('did-attach-webview', (_event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      send('browse:open-tab', url);
+      return { action: 'deny' };
+    });
+
+    // ページの中にフォーカスがあると、画面側の keydown には届かない。
+    // タブ操作のキーだけここで拾って画面へ回す
+    contents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return;
+      const action = shortcuts.fromElectron(input);
+      if (!action) return;
+      event.preventDefault();
+      send('browse:shortcut', action);
+    });
   });
 
   mainWindow.on('closed', () => {
@@ -193,6 +214,24 @@ ipcMain.handle('browse:setPage', (_event, { id, url, title } = {}) => {
 });
 ipcMain.handle('browse:cookies', (_event, urls) => browse.cookiesFor(urls || []));
 ipcMain.handle('browse:clearData', () => browse.clearData());
+
+/* ---------------- 履歴とブックマーク ---------------- */
+
+ipcMain.handle('browse:visit', (_event, { url, title } = {}) => {
+  browseStore.addHistory({ url, title });
+  return true;
+});
+ipcMain.handle('browse:titleKnown', (_event, { url, title } = {}) => {
+  browseStore.updateTitle(url, title);
+  return true;
+});
+ipcMain.handle('browse:history', (_event, options) => browseStore.history(options || {}));
+ipcMain.handle('browse:historyRemove', (_event, url) => browseStore.removeHistory(url));
+ipcMain.handle('browse:historyClear', () => browseStore.clearHistory());
+ipcMain.handle('browse:bookmarks', () => browseStore.bookmarks());
+ipcMain.handle('browse:bookmarkToggle', (_event, info) => browseStore.toggleBookmark(info || {}));
+ipcMain.handle('browse:bookmarkRemove', (_event, url) => browseStore.removeBookmark(url));
+ipcMain.handle('browse:isBookmarked', (_event, url) => browseStore.isBookmarked(url));
 
 /* ---------------- 検出ログ ---------------- */
 
@@ -577,6 +616,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   bridge.stop();
+  // 遅延書き込みが残っていると履歴が失われる
+  browseStore.saveNow();
   // 遅延書き込みが残っていると終了時に失われるので、確実に吐き出す
   queue.saveNow();
   cookies.clearAll();

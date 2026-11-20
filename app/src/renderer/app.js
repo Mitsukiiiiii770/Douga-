@@ -162,7 +162,9 @@ function setProbing(on) {
 function renderVideo(info) {
   state.info = info;
 
-  $('result-title').textContent = info.title;
+  // 保存名は打ち直せる。元の題も覚えておき、変えられたかを見分ける
+  $('result-title').value = info.title || '';
+  state.originalTitle = info.title || '';
   const sub = [];
   if (info.uploader) sub.push(info.uploader);
   if (info.duration) sub.push(formatDuration(info.duration));
@@ -265,10 +267,14 @@ $('add-btn').addEventListener('click', () => {
   const formatId = mode === 'format' ? $('format-select').value : null;
   const chosen = state.info.formats.find((f) => f.id === formatId);
 
+  // 打ち直されていれば、その名前で保存する
+  const typed = $('result-title').value.trim();
+  const edited = typed && typed !== state.originalTitle;
+
   api.jobs.add({
     url: state.info.url,
-    title: state.info.title,
-    titleSource: state.info.titleSource || null,
+    title: edited ? typed : state.info.title,
+    titleSource: edited ? 'user' : state.info.titleSource || null,
     // 'hls' なら ffmpeg 経路で取得する
     source: state.info.source || null,
     cookieHeader: state.info.cookieHeader || null,
@@ -822,14 +828,23 @@ function wireTab(tab) {
     } catch {
       /* 読み込み前は取れない */
     }
-    if (tab === activeTab) syncUrlBar();
+    if (tab === activeTab) {
+      syncUrlBar();
+      refreshStar();
+    }
   };
+
+  view.addEventListener('did-navigate', () => {
+    // 履歴に残す。題は後から分かるので、分かった時点で書き戻す
+    api.browse.visit({ url: tab.url, title: tab.title });
+  });
   view.addEventListener('did-navigate', syncUrl);
   view.addEventListener('did-navigate-in-page', syncUrl);
 
   view.addEventListener('page-title-updated', (event) => {
     tab.title = event.title || tab.title;
     api.browse.setPage({ id: tab.wcId, url: tab.url, title: event.title });
+    api.browse.titleKnown({ url: tab.url, title: event.title });
     renderTabs();
   });
 }
@@ -840,6 +855,7 @@ function activateTab(tab) {
   renderTabs();
   syncUrlBar();
   renderBrowseStatus();
+  refreshStar();
 }
 
 function closeTab(tab) {
@@ -966,6 +982,163 @@ function navigateBrowse(input) {
       : `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`;
   view.loadURL(target);
 }
+
+/* ---------------- ブックマークと履歴 ---------------- */
+
+async function refreshStar() {
+  const url = activeTab ? activeTab.url : '';
+  const marked = url ? await api.browse.isBookmarked(url) : false;
+  const star = $('browse-star');
+  star.textContent = marked ? '★' : '☆';
+  star.title = marked ? 'ブックマークから外す (Ctrl+D)' : 'ブックマークに入れる (Ctrl+D)';
+}
+
+/** 'history' か 'bookmarks' */
+let panelMode = null;
+
+async function openBrowsePanel(mode) {
+  // 同じものをもう一度押したら閉じる
+  if (panelMode === mode) return closeBrowsePanel();
+  panelMode = mode;
+  $('browse-panel').hidden = false;
+  $('browse-panel-title').textContent = mode === 'history' ? '履歴' : 'ブックマーク';
+  $('browse-panel-clear').hidden = mode !== 'history';
+  $('browse-panel-search').value = '';
+  await renderBrowsePanel();
+}
+
+function closeBrowsePanel() {
+  panelMode = null;
+  $('browse-panel').hidden = true;
+}
+
+async function renderBrowsePanel() {
+  if (!panelMode) return;
+  const query = $('browse-panel-search').value.trim();
+  const entries =
+    panelMode === 'history'
+      ? await api.browse.history({ query, limit: 300 })
+      : (await api.browse.bookmarks()).filter((item) => {
+          if (!query) return true;
+          const needle = query.toLowerCase();
+          return (
+            item.url.toLowerCase().includes(needle) ||
+            (item.title || '').toLowerCase().includes(needle)
+          );
+        });
+
+  const list = $('browse-panel-list');
+  list.innerHTML = '';
+  if (!entries.length) {
+    list.appendChild(textNode('li', panelMode === 'history' ? '履歴はありません。' : 'ブックマークはありません。', 'muted'));
+    return;
+  }
+
+  for (const entry of entries) {
+    const item = document.createElement('li');
+
+    const box = document.createElement('div');
+    box.appendChild(textNode('strong', entry.title || entry.url, 'entry-title'));
+    box.appendChild(textNode('span', entry.url, 'muted entry-url'));
+    box.addEventListener('click', () => {
+      navigateBrowse(entry.url);
+      closeBrowsePanel();
+    });
+    item.appendChild(box);
+
+    const remove = textNode('button', '×', 'ghost');
+    remove.title = panelMode === 'history' ? '履歴から消す' : 'ブックマークから外す';
+    remove.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      if (panelMode === 'history') await api.browse.historyRemove(entry.url);
+      else await api.browse.bookmarkRemove(entry.url);
+      await renderBrowsePanel();
+      await refreshStar();
+    });
+    item.appendChild(remove);
+
+    list.appendChild(item);
+  }
+}
+
+$('browse-star').addEventListener('click', async () => {
+  if (!activeTab || !activeTab.url) return;
+  await api.browse.bookmarkToggle({ url: activeTab.url, title: activeTab.title });
+  await refreshStar();
+  if (panelMode === 'bookmarks') await renderBrowsePanel();
+});
+
+$('browse-marks').addEventListener('click', () => openBrowsePanel('bookmarks'));
+$('browse-hist').addEventListener('click', () => openBrowsePanel('history'));
+$('browse-panel-close').addEventListener('click', closeBrowsePanel);
+$('browse-panel-search').addEventListener('input', () => renderBrowsePanel());
+$('browse-panel-clear').addEventListener('click', async () => {
+  await api.browse.historyClear();
+  await renderBrowsePanel();
+});
+
+/* ---------------- キーボード操作 ---------------- */
+
+/**
+ * ページの中にフォーカスがあると画面側の keydown には届かないため、
+ * 主処理からも同じ操作名が送られてくる。入口は 2 つだが処理は 1 つ。
+ */
+function runBrowseShortcut(action) {
+  if (!action) return;
+  const view = browseView();
+
+  if (action === 'new-tab') {
+    // ＋ ボタンと同じく、最初のページを開く
+    createTab();
+    $('browse-url').focus();
+    return;
+  }
+  if (action === 'close-tab') return activeTab && closeTab(activeTab);
+  if (action === 'focus-url') {
+    $('browse-url').focus();
+    $('browse-url').select();
+    return;
+  }
+  if (action === 'reload') return view && view.reload();
+  if (action === 'bookmark') return $('browse-star').click();
+  if (action === 'history') return openBrowsePanel('history');
+  if (action === 'back') return view && view.canGoBack() && view.goBack();
+  if (action === 'forward') return view && view.canGoForward() && view.goForward();
+
+  if (action === 'next-tab' || action === 'prev-tab') {
+    if (browseTabs.length < 2) return;
+    const index = browseTabs.indexOf(activeTab);
+    const step = action === 'next-tab' ? 1 : -1;
+    const next = (index + step + browseTabs.length) % browseTabs.length;
+    return activateTab(browseTabs[next]);
+  }
+
+  const direct = action.match(/^tab-([1-9])$/);
+  if (direct) {
+    const tab = browseTabs[Number(direct[1]) - 1];
+    if (tab) activateTab(tab);
+  }
+}
+
+api.browse.onShortcut((action) => {
+  if (!document.querySelector('.panel[data-panel="browse"]').classList.contains('is-active')) return;
+  runBrowseShortcut(action);
+});
+
+// アプリ内ブラウザの中のリンクが「新しいタブ」を要求したとき
+api.browse.onOpenTab((url) => {
+  if (!url) return;
+  showTab('browse');
+  createTab({ url });
+});
+
+window.addEventListener('keydown', (event) => {
+  if (!document.querySelector('.panel[data-panel="browse"]').classList.contains('is-active')) return;
+  const action = api.browse.shortcutFor(event);
+  if (!action) return;
+  event.preventDefault();
+  runBrowseShortcut(action);
+});
 
 $('browse-newtab').addEventListener('click', () => {
   const tab = createTab();

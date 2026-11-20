@@ -706,7 +706,10 @@ function sanitizeFileName(value) {
  * タイトルをテンプレートに直接埋め込む。
  */
 function outputTemplateFor(job) {
-  if (job.titleSource === 'page' && job.title) {
+  // 'user' は利用者が画面で打ち直した名前。これより優先するものは無い。
+  // 'page' はページから読み取った題。yt-dlp が URL から機械的に作った
+  // 名前（master など）しか持っていないときの補いとして使う
+  if ((job.titleSource === 'user' || job.titleSource === 'page') && job.title) {
     const name = sanitizeFileName(job.title);
     if (name) {
       // テンプレート内の % は yt-dlp の書式指定として解釈されるので退避する

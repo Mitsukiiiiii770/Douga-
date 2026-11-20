@@ -55,7 +55,13 @@
           <div class="result-head">
             <img class="thumb" id="result-thumb" alt="" hidden />
             <div class="result-meta">
-              <h2 id="result-title"></h2>
+              <input
+                id="result-title"
+                class="title-input"
+                type="text"
+                spellcheck="false"
+                title="保存するときの名前。打ち直せます"
+              />
               <p class="muted" id="result-sub"></p>
             </div>
           </div>
@@ -133,11 +139,23 @@
             spellcheck="false"
           />
           <button id="browse-go" class="ghost small">移動</button>
+          <button id="browse-star" class="ghost small" title="ブックマークに入れる (Ctrl+D)">☆</button>
+          <button id="browse-marks" class="ghost small" title="ブックマーク一覧">BM</button>
+          <button id="browse-hist" class="ghost small" title="履歴 (Ctrl+H)">履歴</button>
           <button id="browse-capture" class="primary">この動画を取り込む</button>
         </div>
         <p class="hint" id="browse-status">
           ここで動画を再生すると、配信 URL を自動で見つけます。ログインが必要なサイトは、この中でログインしてください。
         </p>
+        <div class="browse-panel" id="browse-panel" hidden>
+          <div class="browse-panel-head">
+            <strong id="browse-panel-title"></strong>
+            <input id="browse-panel-search" type="search" placeholder="絞り込み" spellcheck="false" />
+            <button id="browse-panel-clear" class="ghost small">すべて消す</button>
+            <button id="browse-panel-close" class="ghost small">閉じる</button>
+          </div>
+          <ul class="client-list" id="browse-panel-list"></ul>
+        </div>
         <div class="browse-tabs" id="browse-tabs">
           <button id="browse-newtab" class="tab-add" title="新しいタブ">＋</button>
         </div>
