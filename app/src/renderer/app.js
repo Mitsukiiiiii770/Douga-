@@ -1092,8 +1092,10 @@ function updateStatus(text, isError = false) {
 async function showVersion() {
   try {
     const info = await api.update.version();
-    const commit = info.commit ? info.commit.slice(0, 7) : '不明（手動で展開した版）';
+    const commit = info.commit ? info.commit.slice(0, 7) : '不明（初回の更新で記録されます）';
     $('update-version').textContent = `バージョン ${info.app}（${info.branch} / ${commit}）`;
+    // コピーが複数あると、どれを動かしているか分からなくなる
+    $('update-root').textContent = info.root ? `場所: ${info.root}` : '';
   } catch {
     $('update-version').textContent = '';
   }
@@ -1351,6 +1353,8 @@ function announceUpdate() {
  * ショートカットを作れば窓は出ない。
  */
 $('app-restart').addEventListener('click', () => api.app.restart());
+
+$('open-root').addEventListener('click', () => api.update.openFolder());
 
 $('open-at-login').addEventListener('change', async (event) => {
   const ok = await api.app.openAtLogin(event.target.checked);

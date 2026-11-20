@@ -421,8 +421,16 @@ ipcMain.handle('update:choosePatchDir', async () => {
 ipcMain.handle('update:version', () => ({
   app: app.getVersion(),
   commit: update.localCommit(),
-  branch: update.BRANCH
+  branch: update.BRANCH,
+  // どのフォルダを動かしているか。コピーが複数あると、
+  // 更新したつもりの版と動かしている版が食い違う
+  root: update.rootDir()
 }));
+
+ipcMain.handle('update:openFolder', async () => {
+  await shell.openPath(update.rootDir());
+  return true;
+});
 
 ipcMain.handle('diagnostics:reset', () => {
   diagnostics.reset();
