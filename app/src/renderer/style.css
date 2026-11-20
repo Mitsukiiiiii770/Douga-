@@ -609,3 +609,10 @@ input[type="number"] {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ログインできない等、操作の前に知らせたいこと */
+.hint.is-warn {
+  background: rgba(255, 180, 60, 0.12);
+  border-color: rgba(255, 180, 60, 0.4);
+  color: #ffce7a;
+}

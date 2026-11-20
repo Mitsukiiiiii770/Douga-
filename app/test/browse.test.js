@@ -61,5 +61,47 @@ const appJs = fs.readFileSync(path.join(RENDERER, 'app.js'), 'utf8');
   check('アプリ側が区画名を公開している', typeof browse.partition === 'function');
   check('公開している値が定数と一致する', browse.partition() === browse.PARTITION);
 
+  group('ログインを拒否されるサイトの案内');
+  // Google は 2019 年以降、埋め込みブラウザからのログインを
+  // フィッシング対策として拒否する。理由が出ないとアプリの不具合に見える
+  const { loginBlock } = require('../src/shared/login-blocks');
+
+  const google = loginBlock('https://accounts.google.com/v3/signin/challenge/dp?TL=xxx');
+  check('Google のログイン画面を見分ける', google && google.name === 'Google');
+  check('理由を説明する', google && /拒否/.test(google.note), google && google.note);
+  check(
+    '代わりの手段を案内する',
+    google && /拡張機能/.test(google.note),
+    '案内だけして行き止まりにしない'
+  );
+  check(
+    'ログイン不要で足りることも伝える',
+    google && /ログインしなくても/.test(google.note),
+    'YouTube は多くの場合ログイン不要'
+  );
+
+  check('Apple も対象', loginBlock('https://appleid.apple.com/auth/authorize') !== null);
+  check('Microsoft も対象', loginBlock('https://login.microsoftonline.com/common') !== null);
+
+  check('YouTube 本体は対象外', loginBlock('https://www.youtube.com/watch?v=1') === null);
+  check(
+    'google.com でも検索は対象外',
+    loginBlock('https://www.google.com/search?q=x') === null,
+    'ログイン画面だけを対象にする'
+  );
+  check('他のサイトは対象外', loginBlock('https://hanime.tv/videos/1') === null);
+  check('壊れた URL でも落ちない', loginBlock('これは URL ではない') === null);
+  check('空でも落ちない', loginBlock('') === null);
+
+  check(
+    '似た名前のドメインに釣られない',
+    loginBlock('https://accounts.google.com.evil.example/signin') === null,
+    '偽サイトを本物として案内しないため'
+  );
+
+  group('画面に出す経路');
+  check('案内を表示する分岐がある', /browseState\.loginBlock/.test(appJs));
+  check('移動のたびに判定する', /api\.browse\.loginBlock\(/.test(appJs));
+
   done('browse');
 })();

@@ -1,6 +1,7 @@
 'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
+const loginBlocks = require('../shared/login-blocks');
 
 /**
  * レンダラーに公開する API。nodeIntegration は無効なので、
@@ -40,7 +41,9 @@ contextBridge.exposeInMainWorld('douga', {
     setPage: (info) => ipcRenderer.invoke('browse:setPage', info),
     cookies: (urls) => ipcRenderer.invoke('browse:cookies', urls),
     clearData: () => ipcRenderer.invoke('browse:clearData'),
-    onUpdate: listen('browse:update')
+    onUpdate: listen('browse:update'),
+    // 埋め込みブラウザからのログインを拒否するサイトか
+    loginBlock: (url) => loginBlocks.loginBlock(url)
   },
   diagnostics: {
     // 観測した通信と判断の理由を書き出す

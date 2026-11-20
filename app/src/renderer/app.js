@@ -721,7 +721,7 @@ api.bridge.onPaired(async () => {
  * 配信 URL の盗聴・Cookie の取得・ページ情報の読み取りが自前でできる。
  * ここでログインした情報は、普段使いのブラウザとは別に保存される。
  */
-const browseState = { candidates: [], pageUrl: '', metaScript: null };
+const browseState = { candidates: [], pageUrl: '', metaScript: null, loginBlock: null };
 
 function browseView() {
   return $('browse-view');
@@ -753,6 +753,9 @@ async function initBrowse() {
     if (event.isMainFrame) {
       api.browse.reset(event.url);
       browseState.candidates = [];
+      // Google などは埋め込みブラウザからのログインを拒否する。
+      // 何も出ないとアプリの不具合に見えるので、理由をその場で伝える
+      browseState.loginBlock = api.browse.loginBlock(event.url);
       renderBrowseStatus();
     }
   });
@@ -778,6 +781,16 @@ async function initBrowse() {
 function renderBrowseStatus() {
   const usable = browseState.candidates.filter((c) => !c.noise).length;
   const status = $('browse-status');
+
+  // ログインできない理由は、動画の件数より先に伝える
+  if (browseState.loginBlock) {
+    status.textContent = browseState.loginBlock.note;
+    status.classList.remove('is-ready');
+    status.classList.add('is-warn');
+    return;
+  }
+  status.classList.remove('is-warn');
+
   if (usable > 0) {
     status.textContent = `動画を ${usable} 件見つけました。「この動画を取り込む」を押すとダウンロードへ進みます。`;
     status.classList.add('is-ready');
