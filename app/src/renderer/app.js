@@ -508,6 +508,7 @@ async function loadSettings() {
   $('bridge-enabled').checked = s.bridgeEnabled;
   $('accept-cookies').checked = s.acceptCookies;
   $('update-auto').checked = s.autoUpdateCheck !== false;
+  $('update-auto-apply').checked = s.autoUpdateApply !== false;
   $('github-token').value = s.githubToken || '';
   $('keep-versions').value = s.keepVersions === undefined ? 3 : s.keepVersions;
   $('open-at-login').checked = !!s.openAtLogin;
@@ -1134,11 +1135,43 @@ setTimeout(async () => {
   try {
     const s = await api.settings.get();
     if (s.autoUpdateCheck === false) return;
+
+    // 更新があれば当ててしまう。手で展開したフォルダから開くと版の記録が
+    // 無く、開くたびに自分で当て直す必要があったため
+    if (s.autoUpdateApply !== false) {
+      const result = await api.update.autoApply();
+      if (result.applied) {
+        await showVersion();
+        updateStatus(
+          `更新を適用しました（${result.updated} ファイル）。` +
+            (result.depsChanged
+              ? '依存が変わったので、閉じて Douga起動.bat から開き直してください。'
+              : '「再起動して反映」を押すと新しい版になります。')
+        );
+        if (!result.depsChanged) $('update-restart').hidden = false;
+        announceUpdate();
+        return;
+      }
+    }
     await checkUpdate({ quiet: true });
   } catch {
     /* 確認できなくても使用には支障がない */
   }
 }, 3000);
+
+/**
+ * 更新が当たったことを、設定タブを開いていなくても気づけるようにする。
+ * 同じ場所から開くだけで最新になるのが目的なので、気づかれないと意味がない。
+ */
+function announceUpdate() {
+  const tab = document.querySelector('.tab[data-tab="settings"]');
+  if (tab && !tab.querySelector('.badge')) {
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = '更新';
+    tab.appendChild(badge);
+  }
+}
 
     if (result.upToDate) {
       if (!quiet) updateStatus('最新版です');
@@ -1174,6 +1207,10 @@ $('update-auto').addEventListener('change', async (event) => {
   await api.settings.set({ autoUpdateCheck: event.target.checked });
 });
 
+$('update-auto-apply').addEventListener('change', async (event) => {
+  await api.settings.set({ autoUpdateApply: event.target.checked });
+});
+
 $('update-apply').addEventListener('click', async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
@@ -1197,11 +1234,43 @@ setTimeout(async () => {
   try {
     const s = await api.settings.get();
     if (s.autoUpdateCheck === false) return;
+
+    // 更新があれば当ててしまう。手で展開したフォルダから開くと版の記録が
+    // 無く、開くたびに自分で当て直す必要があったため
+    if (s.autoUpdateApply !== false) {
+      const result = await api.update.autoApply();
+      if (result.applied) {
+        await showVersion();
+        updateStatus(
+          `更新を適用しました（${result.updated} ファイル）。` +
+            (result.depsChanged
+              ? '依存が変わったので、閉じて Douga起動.bat から開き直してください。'
+              : '「再起動して反映」を押すと新しい版になります。')
+        );
+        if (!result.depsChanged) $('update-restart').hidden = false;
+        announceUpdate();
+        return;
+      }
+    }
     await checkUpdate({ quiet: true });
   } catch {
     /* 確認できなくても使用には支障がない */
   }
 }, 3000);
+
+/**
+ * 更新が当たったことを、設定タブを開いていなくても気づけるようにする。
+ * 同じ場所から開くだけで最新になるのが目的なので、気づかれないと意味がない。
+ */
+function announceUpdate() {
+  const tab = document.querySelector('.tab[data-tab="settings"]');
+  if (tab && !tab.querySelector('.badge')) {
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = '更新';
+    tab.appendChild(badge);
+  }
+}
     $('update-apply').hidden = true;
     $('update-details').hidden = true;
     if (result.depsChanged) {
@@ -1236,11 +1305,43 @@ setTimeout(async () => {
   try {
     const s = await api.settings.get();
     if (s.autoUpdateCheck === false) return;
+
+    // 更新があれば当ててしまう。手で展開したフォルダから開くと版の記録が
+    // 無く、開くたびに自分で当て直す必要があったため
+    if (s.autoUpdateApply !== false) {
+      const result = await api.update.autoApply();
+      if (result.applied) {
+        await showVersion();
+        updateStatus(
+          `更新を適用しました（${result.updated} ファイル）。` +
+            (result.depsChanged
+              ? '依存が変わったので、閉じて Douga起動.bat から開き直してください。'
+              : '「再起動して反映」を押すと新しい版になります。')
+        );
+        if (!result.depsChanged) $('update-restart').hidden = false;
+        announceUpdate();
+        return;
+      }
+    }
     await checkUpdate({ quiet: true });
   } catch {
     /* 確認できなくても使用には支障がない */
   }
 }, 3000);
+
+/**
+ * 更新が当たったことを、設定タブを開いていなくても気づけるようにする。
+ * 同じ場所から開くだけで最新になるのが目的なので、気づかれないと意味がない。
+ */
+function announceUpdate() {
+  const tab = document.querySelector('.tab[data-tab="settings"]');
+  if (tab && !tab.querySelector('.badge')) {
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = '更新';
+    tab.appendChild(badge);
+  }
+}
 
 /* ---------------- 起動用ショートカット ---------------- */
 

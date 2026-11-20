@@ -260,6 +260,31 @@ function write(root, relPath, content) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
+  group('起動時に最新へ追いつく');
+  const settings = require('../src/main/settings');
+  const rendererJs = fs.readFileSync(
+    path.resolve(__dirname, '..', 'src', 'renderer', 'app.js'),
+    'utf8'
+  );
+  check('自動適用が既定で有効', settings.DEFAULTS.autoUpdateApply === true);
+  check('確認そのものも既定で有効', settings.DEFAULTS.autoUpdateCheck === true);
+  check('起動時に適用まで進む', /api\.update\.autoApply\(\)/.test(rendererJs));
+  check(
+    '自動では再起動しない',
+    !/autoApply[\s\S]{0,400}api\.app\.restart\(\)/.test(rendererJs),
+    '作業中に画面が消えるほうが困るため、反映は本人が押したときに行う'
+  );
+  check(
+    '適用したことを知らせる',
+    /announceUpdate\(\)/.test(rendererJs),
+    '気づかれないと「開くだけで最新」にならない'
+  );
+  check(
+    '間隔が短い',
+    update.AUTO_INTERVAL_MS <= 30 * 60 * 1000,
+    `${update.AUTO_INTERVAL_MS / 60000} 分`
+  );
+
   group('待ち時間の表し方');
   check('1 分未満は秒', update.formatWait(45) === '約 45 秒');
   check('端数は切り上げる', update.formatWait(44.2) === '約 45 秒');

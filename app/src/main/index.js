@@ -262,6 +262,40 @@ ipcMain.handle('update:check', async (_event, options = {}) => {
   }
 });
 
+/**
+ * 起動時の自動更新。
+ *
+ * 手で展開したフォルダには版の記録が無いため、開くたびに「不明」となり、
+ * そのつど自分で更新を当てる必要があった。同じ場所から開くだけで
+ * 最新になっているのが期待される動きなので、見つけたら当てる。
+ *
+ * ただし勝手に再起動はしない。作業中に画面が消えるほうが困るため、
+ * 反映は利用者が再起動を押したときにする。
+ */
+ipcMain.handle('update:autoApply', async () => {
+  const cfg = settings.get();
+  if (!cfg.autoUpdateCheck || !cfg.autoUpdateApply) return { ok: true, skipped: true };
+
+  // ダウンロード中にソースを入れ替えない。動いている処理の足元を崩さないため
+  const busy = queue.list().some((job) => queue.ACTIVE_STATUSES.includes(job.status));
+  if (busy) return { ok: true, skipped: true, reason: 'busy' };
+
+  try {
+    const found = await update.check({ auto: true });
+    if (found.skipped || found.upToDate) return { ok: true, skipped: true };
+
+    const result = await update.apply({
+      tree: found.tree,
+      version: found.latest,
+      keep: cfg.keepVersions
+    });
+    return { ok: true, applied: true, ...result };
+  } catch (err) {
+    // 更新できなくても、アプリ自体は使える
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('update:apply', async () => {
   try {
     const tree = pendingUpdate ? pendingUpdate.tree : null;

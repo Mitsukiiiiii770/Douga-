@@ -73,8 +73,15 @@ const APPLIED_FILE = '.douga-applied';
  */
 const STATE_FILE = '.douga-update-state.json';
 
-/** 自動確認の最短間隔。起動のたびに問い合わせる必要はない */
-const AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/**
+ * 自動確認の最短間隔。
+ *
+ * 「開くたびに最新になっていてほしい」ので、できるだけ短くしたい。
+ * ETag を使うようにしたことで、変化が無いときの確認は 304 で返り
+ * 回数制限に数えられないため、短くしても問題ない。
+ * 連続して開き直したときの無駄打ちだけを抑える。
+ */
+const AUTO_INTERVAL_MS = 10 * 60 * 1000;
 
 class UpdateError extends Error {}
 
