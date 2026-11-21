@@ -3,6 +3,8 @@
 const { EventEmitter } = require('events');
 const { session } = require('electron');
 const detect = require('../shared/detect');
+const adblock = require('../shared/adblock');
+const settings = require('./settings');
 const diagnostics = require('./diagnostics');
 
 /**
@@ -45,6 +47,22 @@ class Browser extends EventEmitter {
      * 別のタブで再生した動画が混ざって取り込まれてしまう。
      */
     this.tabs = new Map();
+    /** 止めた数。画面に出して、効いていることが分かるようにする */
+    this.blocked = 0;
+  }
+
+  /** 今の広告ブロック設定 */
+  adBlockOptions() {
+    let cfg = {};
+    try {
+      cfg = settings.get();
+    } catch {
+      return { enabled: false, extra: [] };
+    }
+    return {
+      enabled: cfg.blockAds !== false,
+      extra: adblock.parseExtra(cfg.adBlockExtra)
+    };
   }
 
   /** 指定タブの状態。無ければ作る */
@@ -74,6 +92,23 @@ class Browser extends EventEmitter {
     if (this.attached) return;
     this.attached = true;
     const ses = this.browseSession();
+
+    // 広告・計測を止める。
+    //
+    // 止めるのは広告だと分かっている配信元だけにする。汎用の CDN まで
+    // 巻き込むと、肝心の動画が再生できなくなる。
+    // アプリ自身の画面には影響しない（この区画だけが対象）。
+    ses.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+      try {
+        if (adblock.shouldBlock(details.url, this.adBlockOptions())) {
+          this.blocked++;
+          return callback({ cancel: true });
+        }
+      } catch {
+        /* 判定に失敗したら通す。止めすぎるより通しすぎるほうが安全 */
+      }
+      callback({});
+    });
 
     // 動画配信は Referer を見て弾くサイトが多いので、送られている値を控える
     ses.webRequest.onSendHeaders({ urls: ['<all_urls>'] }, (details) => {
@@ -195,6 +230,7 @@ class Browser extends EventEmitter {
       pageUrl: tab.pageUrl,
       pageTitle: tab.pageTitle,
       segments: tab.segments,
+      blocked: this.blocked,
       headers: tab.headers,
       candidates: [...tab.candidates.values()].sort((a, b) => rank(b) - rank(a))
     };

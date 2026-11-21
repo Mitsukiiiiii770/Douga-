@@ -48,7 +48,11 @@ const DEFAULTS = {
   // アプリ内ブラウザを開いたときに表示するページ
   browseHomePage: 'https://www.google.com',
   // アドレス欄に URL 以外を入れたときの検索先。%s が検索語に置き換わる
-  searchUrl: 'https://www.google.com/search?q=%s'
+  searchUrl: 'https://www.google.com/search?q=%s',
+  // アプリ内ブラウザで広告・計測を止める
+  blockAds: true,
+  // 自分で足す配信元。1 行 1 件
+  adBlockExtra: ''
 };
 
 let cache = null;

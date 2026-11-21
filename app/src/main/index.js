@@ -14,6 +14,7 @@ const postprocess = require('./postprocess');
 const browse = require('./browse');
 const browseStore = require('./browse-store');
 const shortcuts = require('../shared/shortcuts');
+const adblock = require('../shared/adblock');
 const diagnostics = require('./diagnostics');
 const update = require('./update');
 const pageMetaScript = require('../shared/page-meta-script');
@@ -59,8 +60,16 @@ function createWindow() {
   // アプリ内ブラウザの中で「新しいタブで開く」リンクを踏んだとき。
   // 既定のブラウザへ投げてしまうと、ログイン状態も監視も引き継げない
   mainWindow.webContents.on('did-attach-webview', (_event, contents) => {
-    contents.setWindowOpenHandler(({ url }) => {
-      send('browse:open-tab', url);
+    contents.setWindowOpenHandler(({ url, disposition }) => {
+      // ポップアンダー広告は script が勝手に開くもの。
+      // 利用者がリンクを押したもの（中クリック等）だけ新しいタブにする。
+      // ここを素通しにすると、広告を自分でタブとして開いてしまう
+      const cfg = settings.get();
+      const allowed = adblock.allowWindow(
+        { url, disposition },
+        { enabled: cfg.blockAds !== false, extra: adblock.parseExtra(cfg.adBlockExtra) }
+      );
+      if (allowed) send('browse:open-tab', url);
       return { action: 'deny' };
     });
 

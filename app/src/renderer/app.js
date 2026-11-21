@@ -581,6 +581,8 @@ async function loadSettings() {
   $('max-tabs').value = s.maxBrowseTabs || 5;
   $('browse-home-page').value = s.browseHomePage === undefined ? '' : s.browseHomePage;
   $('search-url').value = s.searchUrl || '';
+  $('block-ads').checked = s.blockAds !== false;
+  $('adblock-extra').value = s.adBlockExtra || '';
   browseState.searchUrl = s.searchUrl || browseState.searchUrl;
   $('use-aria2').checked = s.useAria2 !== false;
   // トークンが要る状況でだけ開いておく
@@ -1017,6 +1019,11 @@ async function initBrowse() {
     if (!activeTab) return;
     const state = await api.browse.state(activeTab.wcId);
     activeTab.candidates = state.candidates || [];
+    if (typeof state.blocked === 'number') {
+      $('adblock-count').textContent = state.blocked
+        ? `これまでに ${state.blocked} 件の広告・計測を止めました。`
+        : '';
+    }
     renderBrowseStatus();
   }, 1000);
 }
@@ -1631,6 +1638,14 @@ $('open-at-login').addEventListener('change', async (event) => {
 
 $('use-aria2').addEventListener('change', async (event) => {
   await api.settings.set({ useAria2: event.target.checked });
+});
+
+$('block-ads').addEventListener('change', async (event) => {
+  await api.settings.set({ blockAds: event.target.checked });
+});
+
+$('adblock-extra').addEventListener('change', async (event) => {
+  await api.settings.set({ adBlockExtra: event.target.value });
 });
 
 $('search-engine').addEventListener('change', (event) => {

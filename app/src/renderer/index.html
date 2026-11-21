@@ -213,6 +213,15 @@
             <span>ブラウザのタブ数の上限</span>
             <input type="number" id="max-tabs" min="1" max="12" />
           </label>
+          <label class="check">
+            <input type="checkbox" id="block-ads" />
+            <span>アプリ内ブラウザで広告・計測を止める</span>
+          </label>
+          <label class="field">
+            <span>追加で止める配信元（1 行 1 件）</span>
+            <textarea id="adblock-extra" rows="3" spellcheck="false" placeholder="例: ads.example.com"></textarea>
+          </label>
+          <p class="muted" id="adblock-count"></p>
           <label class="field">
             <span>検索エンジン</span>
             <select id="search-engine">
