@@ -89,6 +89,19 @@ function showTab(name) {
 /* ---------------- 解析 ---------------- */
 
 $('probe-btn').addEventListener('click', () => probe($('url-input').value.trim()));
+
+/**
+ * 解析できなかったページをアプリ内ブラウザで開く。
+ *
+ * 年齢確認や同意の画面で止められているサイトは、一度ここで通せば
+ * その印（Cookie）が残り、次からは URL を貼るだけで取得できる。
+ */
+$('open-in-browser').addEventListener('click', () => {
+  const target = state.lastFailedUrl || $('url-input').value.trim();
+  if (!target) return;
+  showTab('browse');
+  navigateBrowse(target);
+});
 $('url-input').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') probe($('url-input').value.trim());
 });
@@ -101,6 +114,7 @@ async function probe(url, extra = {}) {
   $('url-input').value = url;
   $('probe-error').hidden = true;
   $('probe-fallback').hidden = true;
+  $('open-in-browser').hidden = true;
   $('result').hidden = true;
   $('playlist').hidden = true;
   setProbing(true);
@@ -108,13 +122,27 @@ async function probe(url, extra = {}) {
   state.probeId = uuid();
   state.headers = extra.headers || {};
 
+  // 取り込み経路から渡されていなければ、アプリ内ブラウザが持っている
+  // Cookie を自動で使う。年齢確認だけ通してあるサイトは、
+  // ログインしていなくてもこれで取得できる
+  let cookieList = extra.cookies;
+  let cookieSource = extra.cookieSource || 'extension';
+  if (!cookieList) {
+    cookieSource = 'browser';
+    try {
+      cookieList = await api.browse.cookies([url]);
+    } catch {
+      cookieList = [];
+    }
+  }
+
   const response = await api.engine.probe({
     id: state.probeId,
     url,
     headers: state.headers,
-    cookies: extra.cookies || [],
+    cookies: cookieList || [],
     // Cookie の出どころ。アプリ内ブラウザの分は、外部からの受け取り設定とは別扱い
-    cookieSource: extra.cookieSource || 'extension',
+    cookieSource,
     // ページを解析できないサイトでは、これらへ自動で切り替わる
     candidates: extra.candidates || [],
     // マニフェストへ落ちたときに使うタイトル・サムネ・尺
@@ -126,6 +154,9 @@ async function probe(url, extra = {}) {
   if (!response.ok) {
     $('probe-error').textContent = response.error;
     $('probe-error').hidden = false;
+    // 年齢確認やログインで弾かれている場合、一度ブラウザで開けば通ることが多い
+    state.lastFailedUrl = url;
+    $('open-in-browser').hidden = false;
     renderAttempts(response.attempts);
     return;
   }

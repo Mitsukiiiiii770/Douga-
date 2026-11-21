@@ -201,5 +201,49 @@ const appJs = fs.readFileSync(path.join(RENDERER, 'app.js'), 'utf8');
   check('案内を表示する分岐がある', /\.loginBlock\b/.test(appJs));
   check('移動のたびに判定する', /api\.browse\.loginBlock\(/.test(appJs));
 
+  group('ログインしなくても使えるように');
+  // 年齢確認だけで見られるサイトは多い。一度ブラウザで通せば
+  // その印が Cookie に残るので、次からは URL を貼るだけで足りる
+  check(
+    'URL を貼った場合もブラウザの Cookie を使う',
+    /cookieList = await api\.browse\.cookies\(\[url\]\)/.test(appJs),
+    '取り込み経路を通らなくても、同じ状態で解析できるように'
+  );
+  check(
+    '取り込み経路から渡された分はそちらを優先する',
+    /let cookieList = extra\.cookies;/.test(appJs)
+  );
+  check(
+    '自前のブラウザの分として扱う',
+    /cookieSource = 'browser';/.test(appJs),
+    '外部からの受け取り設定で止めないため'
+  );
+  check(
+    '失敗したらブラウザで開く道を出す',
+    /\$\('open-in-browser'\)\.hidden = false/.test(appJs)
+  );
+  check('押せば移動する', /showTab\('browse'\);\s*\n\s*navigateBrowse\(target\)/.test(appJs));
+  check(
+    '次の解析では隠す',
+    /\$\('open-in-browser'\)\.hidden = true/.test(appJs),
+    '前回の失敗が残り続けないように'
+  );
+
+  group('案内の文言');
+  const engineSrc = fs.readFileSync(
+    path.resolve(__dirname, '..', 'src', 'main', 'engine.js'),
+    'utf8'
+  );
+  check(
+    '年齢確認にも触れている',
+    /年齢確認/.test(engineSrc),
+    'ログインだけが理由とは限らない'
+  );
+  check(
+    '拡張機能を前提にした案内になっていない',
+    !/拡張機能の Cookie 送信を有効に/.test(engineSrc),
+    'アプリだけで完結できるようになったため'
+  );
+
   done('browse');
 })();

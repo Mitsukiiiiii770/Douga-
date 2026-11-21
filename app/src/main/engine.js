@@ -191,7 +191,10 @@ function friendlyError(lines) {
     return 'この動画は DRM で保護されているため、ダウンロードできません。';
   }
   if (/Sign in|login required|members-only|private video|This video is available to/i.test(text)) {
-    return 'ログインが必要な動画です。拡張機能の Cookie 送信を有効にして再試行してください。';
+    return (
+      'ログインか年齢確認が必要なページです。' +
+      'ブラウザタブでこのサイトを開いて確認を通してから、もう一度お試しください。'
+    );
   }
   if (/HTTP Error 40[34]/i.test(text)) {
     return 'サーバーにアクセスを拒否されました（403/404）。Referer や Cookie が必要な可能性があります。';
