@@ -56,7 +56,17 @@
         <span>Cookie を一緒に送る（ログインが必要なサイト用）</span>
       </label>
       <a href="#" id="open-options">設定</a>
+      <a href="#" id="show-report">検出ログ</a>
     </footer>
+
+    <section id="report-box" hidden>
+      <div class="report-head">
+        <strong>検出ログ</strong>
+        <button id="copy-report" class="ghost">コピー</button>
+        <button id="close-report" class="ghost">閉じる</button>
+      </div>
+      <textarea id="report-text" readonly spellcheck="false"></textarea>
+    </section>
 
     <div class="toast" id="toast" hidden></div>
 

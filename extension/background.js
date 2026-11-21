@@ -344,6 +344,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     }
 
+    if (message.type === 'get-report') {
+      const entry = await restore(message.tabId);
+      return sendResponse({ ok: true, text: buildReport(message.tabId, entry) });
+    }
+
     if (message.type === 'clear-candidates') {
       const entry = stateFor(message.tabId);
       entry.candidates.clear();
@@ -359,6 +364,72 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   })();
   return true; // 非同期レスポンス
 });
+
+/**
+ * 何を見て何を捨てたかを、人が読める形にまとめる。
+ *
+ * 検出できないサイトの原因は、画面の「見つかりません」からは分からない。
+ * 拡張子も Content-Type も無い配信なのか、小さすぎて捨てたのか、
+ * そもそも通信が見えていないのかで、直し方が全く違う。
+ */
+function buildReport(tabId, entry) {
+  const lines = [];
+  const bytes = (size) => {
+    if (size === null || size === undefined) return '不明';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = Number(size);
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+  };
+
+  lines.push('Douga 拡張機能 検出ログ');
+  lines.push(new Date().toLocaleString('ja-JP'));
+  lines.push(`ページ: ${(entry.pageUrl || '').slice(0, 300)}`);
+  lines.push(`表題: ${entry.pageTitle || ''}`);
+  lines.push(`MediaSource(blob:) での再生: ${entry.usesMediaSource ? 'あり' : 'なし'}`);
+  lines.push(`セグメントの通信: ${entry.segments || 0} 件`);
+  lines.push(`動画の手がかりが無い通信: ${entry.uninteresting || 0} 件（数のみ）`);
+  lines.push('');
+  lines.push('※ Cookie とその値は含まれません。長い URL は切っています。');
+  lines.push('');
+
+  const candidates = [...entry.candidates.values()];
+  lines.push(`=== 採用した候補 (${candidates.length} 件) ===`);
+  if (!candidates.length) lines.push('（なし）');
+  for (const item of candidates) {
+    lines.push(`○ ${item.url.slice(0, 300)}`);
+    lines.push(`    種別=${item.kind || '不明'}  大きさ=${bytes(item.size)}${item.noise ? '  ※降格' : ''}`);
+  }
+  lines.push('');
+
+  const rejected = [...entry.rejected.values()];
+  lines.push(`=== 捨てた URL (${rejected.length} 件) ===`);
+  if (!rejected.length) lines.push('（なし）');
+
+  const groups = new Map();
+  for (const item of rejected) {
+    const key = item.reason || '(理由なし)';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  for (const [reason, items] of [...groups.entries()].sort((a, b) => b[1].length - a[1].length)) {
+    lines.push('');
+    lines.push(`■ ${reason}（${items.length} 件）`);
+    for (const item of items.slice(0, 10)) {
+      lines.push(`  ${item.url}`);
+      lines.push(`    種類=${item.resourceType || '?'}  Content-Type=${item.mime || '(無し)'}  大きさ=${bytes(item.size)}`);
+    }
+    if (items.length > 10) lines.push(`  …他 ${items.length - 10} 件`);
+  }
+
+  lines.push('');
+  lines.push('=== ここまで ===');
+  return lines.join('\n');
+}
 
 /** null / 空文字を落とす。既存の良い値を空で上書きしないため */
 function pruneEmpty(obj) {

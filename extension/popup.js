@@ -318,3 +318,44 @@ $('open-options').addEventListener('click', (event) => {
   connection = await ping();
   renderStatus();
 })();
+
+/* ---------------- 検出ログ ---------------- */
+
+/**
+ * 何を見て何を捨てたかを出す。
+ *
+ * 「見つかりません」だけでは、拡張子も Content-Type も無い配信なのか、
+ * 小さすぎて捨てたのか、そもそも通信が見えていないのかが分からない。
+ * 直し方が全く違うので、推測せずに済むようにしておく。
+ */
+$('show-report').addEventListener('click', async (event) => {
+  event.preventDefault();
+  if (!currentTab) return;
+  const box = $('report-box');
+  if (!box.hidden) {
+    box.hidden = true;
+    return;
+  }
+  const response = await chrome.runtime
+    .sendMessage({ type: 'get-report', tabId: currentTab.id })
+    .catch(() => null);
+  $('report-text').value =
+    response && response.ok ? response.text : '検出ログを取得できませんでした。';
+  box.hidden = false;
+});
+
+$('close-report').addEventListener('click', () => {
+  $('report-box').hidden = true;
+});
+
+$('copy-report').addEventListener('click', async () => {
+  const text = $('report-text').value;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('コピーしました');
+  } catch {
+    // クリップボードが使えない場合は選択だけしておく
+    $('report-text').select();
+    toast('選んだので Ctrl+C でコピーしてください');
+  }
+});

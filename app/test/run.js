@@ -26,6 +26,7 @@ const suites = [
   'browse.test.js',
   'browse-store.test.js',
   'search.test.js',
+  'extension.test.js',
   'bridge.test.js',
   'queue.test.js',
   'persistence.test.js'
