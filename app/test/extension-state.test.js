@@ -180,5 +180,29 @@ function ask(listeners, message) {
   check('セグメントは候補にしない', !got.candidates.some((c) => c.url.includes('seg-1')));
   check('セグメントは数える', got.segments === 1, got.segments);
 
+  group('どのタブにも紐づかない通信');
+  // service worker や事前読み込みから出た通信は tabId が -1 になる。
+  // 候補にはできないが、「見えていたのに捨てた」のか
+  // 「そもそも見えていない」のかで原因が全く違うので記録する
+  const store5 = {};
+  const w5 = startWorker(store5);
+  sendResponse(w5.listeners, 15, 'https://site.example/page.html', { mime: 'text/html' });
+  sendResponse(w5.listeners, -1, 'https://cdn.example/hidden.mp4', { mime: 'video/mp4' });
+  sendResponse(w5.listeners, -1, 'https://cdn.example/tracker.gif', { mime: 'image/gif' });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  const offReport = await ask(w5.listeners, { type: 'get-report', tabId: 15 });
+  check('紐づかない通信を数える', /どのタブにも紐づかない通信: 2 件/.test(offReport.text), offReport.text.slice(0, 400));
+  check('そのうち動画らしきものも数える', /動画らしきもの 1 件/.test(offReport.text));
+  check('見本を出す', /hidden\.mp4/.test(offReport.text), '原因の特定に使う');
+  check('動画でないものは見本に出さない', !/tracker\.gif/.test(offReport.text));
+  check(
+    '候補には混ぜない',
+    !(await ask(w5.listeners, { type: 'get-candidates', tabId: 15 })).candidates.some((c) =>
+      c.url.includes('hidden.mp4')
+    ),
+    'どのタブのものか分からないため'
+  );
+
   done('extension-state');
 })();

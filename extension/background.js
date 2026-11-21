@@ -33,6 +33,27 @@ const MAX_REJECTED_PER_TAB = 80;
 /** @type {Map<number, {candidates: Map<string, object>, segments: number, headers: object, pageUrl: string, pageTitle: string}>} */
 const tabs = new Map();
 
+/**
+ * どのタブにも紐づかない通信の記録。
+ *
+ * service worker や事前読み込みから出た通信は tabId が -1 になり、
+ * どのタブのものか分からないので候補にはできない。
+ * ただし「見えてはいたが捨てた」のか「そもそも見えていない」のかで
+ * 原因が全く違うので、数と見本だけ控えておく。
+ */
+const offTab = { total: 0, mediaish: 0, samples: [] };
+
+function noteOffTab(url, mime) {
+  offTab.total++;
+  const looksMedia =
+    MEDIA_MIME_RE.test(mime || '') || MANIFEST_RE.test(url) || MEDIA_FILE_RE.test(url);
+  if (!looksMedia) return;
+  offTab.mediaish++;
+  if (offTab.samples.length < 10) {
+    offTab.samples.push({ url: url.slice(0, 300), mime: mime || '' });
+  }
+}
+
 function stateFor(tabId) {
   let entry = tabs.get(tabId);
   if (!entry) {
@@ -258,7 +279,6 @@ chrome.webRequest.onSendHeaders.addListener(
 
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
-    if (details.tabId < 0) return;
     const url = details.url;
 
     let mime = '';
@@ -267,6 +287,13 @@ chrome.webRequest.onHeadersReceived.addListener(
       const name = header.name.toLowerCase();
       if (name === 'content-type') mime = header.value || '';
       if (name === 'content-length') size = Number(header.value) || null;
+    }
+
+    // どのタブのものか分からない通信。候補にはできないが、
+    // 見えていたことだけは記録しておく
+    if (details.tabId < 0) {
+      noteOffTab(url, mime);
+      return;
     }
 
     // 個々のセグメントは候補に出さない（マニフェストがあれば十分）
@@ -444,6 +471,10 @@ function buildReport(tabId, entry) {
   lines.push(`MediaSource(blob:) での再生: ${entry.usesMediaSource ? 'あり' : 'なし'}`);
   lines.push(`セグメントの通信: ${entry.segments || 0} 件`);
   lines.push(`動画の手がかりが無い通信: ${entry.uninteresting || 0} 件（数のみ）`);
+  lines.push(
+    `どのタブにも紐づかない通信: ${offTab.total} 件` +
+      `（うち動画らしきもの ${offTab.mediaish} 件）`
+  );
   lines.push('');
   lines.push('※ Cookie とその値は含まれません。長い URL は切っています。');
   lines.push('');
@@ -475,6 +506,16 @@ function buildReport(tabId, entry) {
       lines.push(`    種類=${item.resourceType || '?'}  Content-Type=${item.mime || '(無し)'}  大きさ=${bytes(item.size)}`);
     }
     if (items.length > 10) lines.push(`  …他 ${items.length - 10} 件`);
+  }
+
+  if (offTab.samples.length) {
+    lines.push('');
+    lines.push('=== どのタブにも紐づかない動画らしき通信 ===');
+    lines.push('（service worker や事前読み込みから出たもの。タブが分からないため候補にできない）');
+    for (const item of offTab.samples) {
+      lines.push(`  ${item.url}`);
+      lines.push(`    Content-Type=${item.mime || '(無し)'}`);
+    }
   }
 
   lines.push('');
