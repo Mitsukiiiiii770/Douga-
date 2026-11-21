@@ -208,7 +208,10 @@ function friendlyError(lines) {
     return 'YouTube のページとして解析しようとして失敗しました。動画ページの URL（watch?v=... の形）を指定してください。';
   }
   if (/Unsupported URL/i.test(text)) {
-    return 'このページは直接解析できませんでした。ブラウザ拡張機能から送ると、ページ内のストリームを自動で試します。';
+    return (
+      'このページは直接解析できませんでした。' +
+      'ブラウザタブで開いて動画を再生すると、配信 URL を自動で見つけて取り込みます。'
+    );
   }
   if (/Unable to download webpage|getaddrinfo|Connection|timed out/i.test(text)) {
     return 'ネットワークに接続できませんでした。';
@@ -555,7 +558,12 @@ function summarizeAttempts(attempts, { hadUsableCandidates = true } = {}) {
   // 「拡張機能から送ってください」と案内しても既に送っているので意味がない。
   // 本当に必要な操作（動画を再生してから送り直す）を伝える
   if (!hadUsableCandidates && messages.some((m) => /直接解析できませんでした/.test(m))) {
-    return 'このサイトはページからは解析できませんでした。動画を一度再生してから、もう一度拡張機能で送ってください（再生を始めないと配信 URL が現れないサイトがあります）。';
+    return (
+      'このサイトはページからは解析できませんでした。' +
+      '下のボタンでブラウザタブに開き、動画を再生してください' +
+      '（再生を始めないと配信 URL が現れないサイトがあります）。' +
+      '見つかり次第、自動で取り込みます。'
+    );
   }
   if (attempts.length > 1) {
     return `${attempts.length} 件の URL を試しましたが取得できませんでした。最後のエラー: ${

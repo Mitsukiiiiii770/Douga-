@@ -222,12 +222,40 @@ const appJs = fs.readFileSync(path.join(RENDERER, 'app.js'), 'utf8');
     '失敗したらブラウザで開く道を出す',
     /\$\('open-in-browser'\)\.hidden = false/.test(appJs)
   );
-  check('押せば移動する', /showTab\('browse'\);\s*\n\s*navigateBrowse\(target\)/.test(appJs));
+  check(
+    '押せばブラウザタブへ移ってそのページを開く',
+    /showTab\('browse'\)/.test(appJs) && /navigateBrowse\(target\)/.test(appJs)
+  );
   check(
     '次の解析では隠す',
     /\$\('open-in-browser'\)\.hidden = true/.test(appJs),
     '前回の失敗が残り続けないように'
   );
+
+  group('見つかり次第そのまま進める');
+  // hanime のように、再生するまで配信 URL が現れないサイトがある。
+  // 手で「取り込む」を押させると、せっかく見つけても取りこぼす
+  check(
+    '取り込みを関数に出している',
+    /async function captureCurrentTab\(\)/.test(appJs),
+    'ボタンと自動取り込みの両方から使うため'
+  );
+  check('ボタンからも呼ぶ', /browse-capture'\)\.addEventListener\('click', captureCurrentTab\)/.test(appJs));
+  check(
+    '失敗したページは自動取り込みの印を付ける',
+    /tab\.autoCapture = true/.test(appJs)
+  );
+  check(
+    '使える候補が出たら進める',
+    /autoCapture && activeTab\.candidates\.some\(\(c\) => !c\.noise\)/.test(appJs),
+    '広告だけで進めてしまわないように'
+  );
+  check(
+    '一度進めたら印を消す',
+    /activeTab\.autoCapture = false/.test(appJs),
+    '何度も取り込みに行かないため'
+  );
+  check('待っていることを画面に出す', /自動で取り込んで解析に進みます/.test(appJs));
 
   group('案内の文言');
   const engineSrc = fs.readFileSync(
@@ -243,6 +271,16 @@ const appJs = fs.readFileSync(path.join(RENDERER, 'app.js'), 'utf8');
     '拡張機能を前提にした案内になっていない',
     !/拡張機能の Cookie 送信を有効に/.test(engineSrc),
     'アプリだけで完結できるようになったため'
+  );
+  check(
+    '解析できないときもブラウザタブへ誘導する',
+    /ブラウザタブ/.test(engineSrc),
+    '拡張機能が無くても完結できる必要がある'
+  );
+  check(
+    '「拡張機能で送って」と言わない',
+    !/拡張機能で送って/.test(engineSrc) && !/拡張機能から送ると/.test(engineSrc),
+    engineSrc.match(/.{0,30}拡張機能.{0,30}/g) || ''
   );
 
   done('browse');

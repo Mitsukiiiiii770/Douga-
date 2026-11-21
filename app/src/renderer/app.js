@@ -100,7 +100,13 @@ $('open-in-browser').addEventListener('click', () => {
   const target = state.lastFailedUrl || $('url-input').value.trim();
   if (!target) return;
   showTab('browse');
-  navigateBrowse(target);
+  const tab = createTab({ url: target }) || activeTab;
+  if (tab) {
+    // 再生して配信 URL が現れたら、こちらで拾って解析まで進める。
+    // 手で「取り込む」を押させると、せっかく見つけても取りこぼす
+    tab.autoCapture = true;
+    navigateBrowse(target);
+  }
 });
 $('url-input').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') probe($('url-input').value.trim());
@@ -1019,6 +1025,12 @@ async function initBrowse() {
     if (!activeTab) return;
     const state = await api.browse.state(activeTab.wcId);
     activeTab.candidates = state.candidates || [];
+    // 解析に失敗してここへ送られてきた場合は、見つかり次第そのまま進める
+    if (activeTab.autoCapture && activeTab.candidates.some((c) => !c.noise)) {
+      activeTab.autoCapture = false;
+      captureCurrentTab();
+      return;
+    }
     if (typeof state.blocked === 'number') {
       $('adblock-count').textContent = state.blocked
         ? `これまでに ${state.blocked} 件の広告・計測を止めました。`
@@ -1041,6 +1053,13 @@ function renderBrowseStatus() {
     return;
   }
   status.classList.remove('is-warn');
+
+  if (activeTab && activeTab.autoCapture && usable === 0) {
+    status.textContent =
+      '動画を再生してください。配信 URL が見つかり次第、自動で取り込んで解析に進みます。';
+    status.classList.remove('is-ready');
+    return;
+  }
 
   if (usable > 0) {
     status.textContent = `動画を ${usable} 件見つけました。「この動画を取り込む」を押すとダウンロードへ進みます。`;
@@ -1248,10 +1267,15 @@ $('browse-home').addEventListener('click', () => {
   if (browseState.homePage) navigateBrowse(browseState.homePage);
 });
 
-$('browse-capture').addEventListener('click', async () => {
+/**
+ * 今見ているタブの動画を取り込む。
+ * 「この動画を取り込む」からも、自動取り込みからも呼ぶ。
+ */
+async function captureCurrentTab() {
   const button = $('browse-capture');
   const view = browseView();
   if (!view) return;
+  if (activeTab) activeTab.autoCapture = false;
   button.disabled = true;
   button.textContent = '取り込み中…';
   try {
@@ -1283,7 +1307,9 @@ $('browse-capture').addEventListener('click', async () => {
     button.disabled = false;
     button.textContent = 'この動画を取り込む';
   }
-});
+}
+
+$('browse-capture').addEventListener('click', captureCurrentTab);
 
 /* ---------------- 検出ログ ---------------- */
 
