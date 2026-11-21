@@ -46,7 +46,9 @@ const DEFAULTS = {
   // アプリ内ブラウザで一度に開けるタブの数
   maxBrowseTabs: 5,
   // アプリ内ブラウザを開いたときに表示するページ
-  browseHomePage: 'https://www.google.com'
+  browseHomePage: 'https://www.google.com',
+  // アドレス欄に URL 以外を入れたときの検索先。%s が検索語に置き換わる
+  searchUrl: 'https://www.google.com/search?q=%s'
 };
 
 let cache = null;

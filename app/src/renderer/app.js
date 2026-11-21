@@ -547,6 +547,8 @@ async function loadSettings() {
   $('open-at-login').checked = !!s.openAtLogin;
   $('max-tabs').value = s.maxBrowseTabs || 5;
   $('browse-home-page').value = s.browseHomePage === undefined ? '' : s.browseHomePage;
+  $('search-url').value = s.searchUrl || '';
+  browseState.searchUrl = s.searchUrl || browseState.searchUrl;
   $('use-aria2').checked = s.useAria2 !== false;
   // トークンが要る状況でだけ開いておく
   $('update-token-box').open = !!s.githubToken;
@@ -762,7 +764,12 @@ api.bridge.onPaired(async () => {
  * 配信 URL の盗聴・Cookie の取得・ページ情報の読み取りが自前でできる。
  * ここでログインした情報は、普段使いのブラウザとは別に保存される。
  */
-const browseState = { metaScript: null, maxTabs: 5, homePage: 'https://www.google.com' };
+const browseState = {
+  metaScript: null,
+  maxTabs: 5,
+  homePage: 'https://www.google.com',
+  searchUrl: 'https://www.google.com/search?q=%s'
+};
 
 /**
  * 開いているタブ。
@@ -962,6 +969,7 @@ async function initBrowse() {
     const cfg = await api.settings.get();
     browseState.maxTabs = cfg.maxBrowseTabs || 5;
     if (cfg.browseHomePage !== undefined) browseState.homePage = cfg.browseHomePage;
+    if (cfg.searchUrl) browseState.searchUrl = cfg.searchUrl;
   } catch {
     /* 既定のままでよい */
   }
@@ -1005,16 +1013,11 @@ function renderBrowseStatus() {
 }
 
 function navigateBrowse(input) {
-  const raw = (input || '').trim();
-  if (!raw) return;
   const view = browseView();
   if (!view) return;
-  // URL に見えなければ検索として扱う
-  const target = /^https?:\/\//i.test(raw)
-    ? raw
-    : /^[\w-]+(\.[\w-]+)+/.test(raw)
-      ? `https://${raw}`
-      : `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`;
+  // URL に見えなければ検索として扱う。判断は共通の処理に任せる
+  const target = api.browse.resolveNavigation(input, browseState.searchUrl);
+  if (!target) return;
   try {
     view.loadURL(target);
   } catch {
@@ -1593,6 +1596,19 @@ $('open-at-login').addEventListener('change', async (event) => {
 
 $('use-aria2').addEventListener('change', async (event) => {
   await api.settings.set({ useAria2: event.target.checked });
+});
+
+$('search-engine').addEventListener('change', (event) => {
+  const engine = api.browse.searchEngines().find((item) => item.id === event.target.value);
+  if (!engine) return;
+  $('search-url').value = engine.url;
+  $('search-url').dispatchEvent(new Event('change'));
+});
+
+$('search-url').addEventListener('change', async (event) => {
+  const value = event.target.value.trim();
+  browseState.searchUrl = value;
+  await api.settings.set({ searchUrl: value });
 });
 
 $('browse-home-page').addEventListener('change', async (event) => {

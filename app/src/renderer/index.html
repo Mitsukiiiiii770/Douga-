@@ -209,6 +209,19 @@
             <input type="number" id="max-tabs" min="1" max="12" />
           </label>
           <label class="field">
+            <span>検索エンジン</span>
+            <select id="search-engine">
+              <option value="">選んで反映</option>
+              <option value="google">Google</option>
+              <option value="duckduckgo">DuckDuckGo</option>
+              <option value="bing">Bing</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>検索 URL（%s が検索語）</span>
+            <input type="text" id="search-url" spellcheck="false" placeholder="https://www.google.com/search?q=%s" />
+          </label>
+          <label class="field">
             <span>ブラウザの最初のページ</span>
             <input type="url" id="browse-home-page" placeholder="https://www.google.com" spellcheck="false" />
           </label>

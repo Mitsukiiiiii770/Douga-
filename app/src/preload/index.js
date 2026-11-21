@@ -3,6 +3,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const loginBlocks = require('../shared/login-blocks');
 const shortcutsShared = require('../shared/shortcuts');
+const searchShared = require('../shared/search');
 
 /**
  * レンダラーに公開する API。nodeIntegration は無効なので、
@@ -58,7 +59,10 @@ contextBridge.exposeInMainWorld('douga', {
     clearData: () => ipcRenderer.invoke('browse:clearData'),
     onUpdate: listen('browse:update'),
     // 埋め込みブラウザからのログインを拒否するサイトか
-    loginBlock: (url) => loginBlocks.loginBlock(url)
+    loginBlock: (url) => loginBlocks.loginBlock(url),
+    // アドレス欄の入力を移動先に変える。URL か検索語かはここで判断する
+    resolveNavigation: (raw, template) => searchShared.resolveNavigation(raw, template),
+    searchEngines: () => searchShared.ENGINES
   },
   app: {
     restart: () => ipcRenderer.invoke('app:restart'),
