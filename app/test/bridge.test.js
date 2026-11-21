@@ -116,6 +116,27 @@ async function call(pathname, { method = 'GET', origin, token, body } = {}) {
   check('プリフライトは 204', res.status === 204, res.status);
 
   bridge.stop();
+  group('Cookie を使ってよいかの判断');
+  // 「Cookie を受け取る」は、外部の拡張機能が localhost 経由で送ってくる
+  // ものを許すかどうかの設定。アプリ内ブラウザでログインした分を同じ扱いに
+  // すると「ログインしたのに取得できない」という失敗になる
+  const cookiesMod = require('../src/main/cookies');
+  const use = (o) => cookiesMod.shouldUse(o);
+
+  check(
+    'アプリ内ブラウザの分は設定に関係なく使う',
+    use({ cookieSource: 'browser', acceptCookies: false }) === true,
+    '利用者自身がこのアプリの中でログインしたもの'
+  );
+  check('設定が入でも使う', use({ cookieSource: 'browser', acceptCookies: true }) === true);
+  check(
+    '拡張機能からの分は設定に従う',
+    use({ cookieSource: 'extension', acceptCookies: false }) === false
+  );
+  check('設定が入なら使う', use({ cookieSource: 'extension', acceptCookies: true }) === true);
+  check('出どころ不明は設定に従う', use({ acceptCookies: false }) === false);
+  check('引数が無くても落ちない', use() === false);
+
   done('bridge');
 })().catch((err) => {
   console.error('例外:', err);

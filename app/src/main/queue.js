@@ -296,8 +296,14 @@ class Queue extends EventEmitter {
     } finally {
       job.controller = null;
       this.running.delete(job.id);
-      cookies.remove(job.cookieFile);
-      job.cookieFile = null;
+      // Cookie は成功したときだけ捨てる。
+      // 失敗・中止は「再試行」できる状態なので、ここで消すと
+      // 再試行がログイン前の状態で走り、同じ理由で失敗する。
+      // 残った分はジョブの削除時とアプリ終了時に消える
+      if (job.status === 'completed') {
+        cookies.remove(job.cookieFile);
+        job.cookieFile = null;
+      }
       this.emitUpdate(job);
       this.pump();
     }

@@ -104,4 +104,19 @@ function headerFor(url, cookieList) {
   return matched.length ? matched.map((c) => `${c.name}=${c.value}`).join('; ') : null;
 }
 
-module.exports = { write, remove, clearAll, toNetscape, headerFor };
+/**
+ * その Cookie を使ってよいか。
+ *
+ * 「Cookie を受け取る」設定は、外部のブラウザ拡張機能が localhost 経由で
+ * 送ってくるものを許すかどうかの話。アプリ内ブラウザでログインした分は
+ * 利用者自身がこのアプリの中で入れたものなので、同じ扱いにすると
+ * 「ログインしたのに取得できない」という理由の分からない失敗になる。
+ *
+ * @param {{cookieSource?: string, acceptCookies?: boolean}} input
+ */
+function shouldUse({ cookieSource, acceptCookies } = {}) {
+  if (cookieSource === 'browser') return true;
+  return !!acceptCookies;
+}
+
+module.exports = { write, remove, clearAll, toNetscape, headerFor, shouldUse };

@@ -516,10 +516,15 @@ ipcMain.handle('binaries:install', async (_event, which) => {
 
 ipcMain.handle(
   'engine:probe',
-  async (_event, { id, url, headers, cookies: cookieList, candidates, meta }) => {
+  async (_event, { id, url, headers, cookies: cookieList, cookieSource, candidates, meta }) => {
     const controller = new AbortController();
     if (id) probeControllers.set(id, controller);
-    const cookieFile = settings.get().acceptCookies ? cookies.write(cookieList) : null;
+
+    const trusted = cookies.shouldUse({
+      cookieSource,
+      acceptCookies: settings.get().acceptCookies
+    });
+    const cookieFile = trusted ? cookies.write(cookieList) : null;
     try {
       // ページ URL がだめでも、拡張機能が検出したストリームへ自動で落ちる
       const { info, usedUrl, attempts } = await engine.probeChain(url, candidates, {
@@ -531,7 +536,7 @@ ipcMain.handle(
       });
       // 後続のダウンロードでも同じ Cookie を使えるようにパスを返す
       // HLS を ffmpeg で取る場合、Cookie はファイルではなくヘッダで渡す
-      if (info && info.source === 'hls') {
+      if (info && info.source === 'hls' && trusted) {
         info.cookieHeader = cookies.headerFor(usedUrl, cookieList);
       }
       diagnostics.probe({

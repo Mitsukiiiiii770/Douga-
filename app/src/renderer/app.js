@@ -113,6 +113,8 @@ async function probe(url, extra = {}) {
     url,
     headers: state.headers,
     cookies: extra.cookies || [],
+    // Cookie の出どころ。アプリ内ブラウザの分は、外部からの受け取り設定とは別扱い
+    cookieSource: extra.cookieSource || 'extension',
     // ページを解析できないサイトでは、これらへ自動で切り替わる
     candidates: extra.candidates || [],
     // マニフェストへ落ちたときに使うタイトル・サムネ・尺
@@ -1234,6 +1236,8 @@ $('browse-capture').addEventListener('click', async () => {
     await probe(pageUrl, {
       headers: { referer: pageUrl, userAgent: navigator.userAgent },
       cookies,
+      // 自分のブラウザでログインしたもの。受け取りの可否を問う相手がいない
+      cookieSource: 'browser',
       candidates,
       meta
     });

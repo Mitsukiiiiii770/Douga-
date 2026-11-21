@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { fixture, group, check, done, sleep } = require('./helper');
@@ -72,6 +73,24 @@ const queue = require('../src/main/queue');
   group('後片付け');
   queue.clearFinished();
   check('完了済みを一括削除できる', queue.list().length === 0, queue.list().length);
+
+  group('再試行のために Cookie を残す');
+  // 失敗した時点で Cookie を消すと、再試行がログイン前の状態で走り、
+  // 同じ理由で失敗する。hanime のようにログインが要るサイトで詰む
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '..', 'src', 'main', 'queue.js'),
+    'utf8'
+  );
+  check(
+    '成功したときだけ捨てる',
+    /if \(job\.status === 'completed'\)\s*\{\s*cookies\.remove/.test(source),
+    source.match(/cookies\.remove[^\n]*/g)
+  );
+  check(
+    '無条件には消さない',
+    !/this\.running\.delete\(job\.id\);\s*\n\s*cookies\.remove/.test(source)
+  );
+  check('ジョブを消すときは捨てる', /remove\(id\)[\s\S]{0,200}cookies\.remove/.test(source));
 
   done('queue');
 })().catch((err) => {
