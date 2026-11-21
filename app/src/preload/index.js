@@ -89,7 +89,10 @@ contextBridge.exposeInMainWorld('douga', {
     choosePatchDir: () => ipcRenderer.invoke('update:choosePatchDir')
   },
   postprocess: {
-    presets: () => ipcRenderer.invoke('postprocess:presets')
+    presets: () => ipcRenderer.invoke('postprocess:presets'),
+    // 10 秒だけ処理して、元と処理後を書き出す
+    sample: (info) => ipcRenderer.invoke('postprocess:sample', info),
+    onSampleProgress: listen('postprocess:sampleProgress')
   },
   engine: {
     probe: (payload) => ipcRenderer.invoke('engine:probe', payload),
