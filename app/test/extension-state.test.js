@@ -27,8 +27,17 @@ const { group, check, done } = require('./helper');
 const DIR = path.resolve(__dirname, '..', '..', 'extension');
 
 /** service worker を 1 つ起動する。storage は呼び出し側で共有する */
-function startWorker(storage) {
-  const listeners = { headers: null, sendHeaders: null, message: null, updated: null, removed: null };
+function startWorker(storage, { openTabs = [] } = {}) {
+  const listeners = {
+    headers: null,
+    sendHeaders: null,
+    message: null,
+    updated: null,
+    removed: null,
+    installed: null,
+    startup: null
+  };
+  const injected = [];
 
   const chrome = {
     storage: {
@@ -50,9 +59,25 @@ function startWorker(storage) {
     },
     tabs: {
       onUpdated: { addListener: (cb) => (listeners.updated = cb) },
-      onRemoved: { addListener: (cb) => (listeners.removed = cb) }
+      onRemoved: { addListener: (cb) => (listeners.removed = cb) },
+      query: async () => openTabs,
+      get: async (id) => {
+        const hit = openTabs.find((t) => t.id === id);
+        if (!hit) throw new Error('no tab');
+        return hit;
+      }
     },
-    runtime: { onMessage: { addListener: (cb) => (listeners.message = cb) } },
+    scripting: {
+      executeScript: async (opts) => {
+        injected.push(opts);
+        return [];
+      }
+    },
+    runtime: {
+      onMessage: { addListener: (cb) => (listeners.message = cb) },
+      onInstalled: { addListener: (cb) => (listeners.installed = cb) },
+      onStartup: { addListener: (cb) => (listeners.startup = cb) }
+    },
     action: {
       setBadgeText: async () => {},
       setBadgeBackgroundColor: async () => {}
@@ -87,7 +112,7 @@ function startWorker(storage) {
   sandbox.__ctx = context;
 
   vm.runInContext(fs.readFileSync(path.join(DIR, 'background.js'), 'utf8'), context);
-  return { listeners, chrome };
+  return { listeners, chrome, injected };
 }
 
 /** 動画らしい応答を 1 件流す */
@@ -203,6 +228,47 @@ function ask(listeners, message) {
     ),
     'どのタブのものか分からないため'
   );
+
+  group('既に開いているタブへ入れ直す');
+  // 拡張機能を読み込み直すと、開いているタブには content script が入らない。
+  // 利用者には「再読み込みしたのに検出しない」としか見えず、原因が分かりにくい
+  const store6 = {};
+  const openTabs = [
+    { id: 21, url: 'https://www.youtube.com/watch?v=abc', title: 'ある動画 - YouTube' },
+    { id: 22, url: 'https://site.example/', title: 'どこか' }
+  ];
+  const w6 = startWorker(store6, { openTabs });
+  check('入れ直す仕組みがある', typeof w6.listeners.installed === 'function');
+  check('起動時にも入れ直す', typeof w6.listeners.startup === 'function');
+
+  await w6.listeners.installed();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  check('開いているタブに入れる', w6.injected.length >= 2, w6.injected.length);
+  check(
+    'content script を入れる',
+    w6.injected.some((i) => (i.files || []).includes('content.js'))
+  );
+  check(
+    'ページ側の通信を覗く分は MAIN に入れる',
+    w6.injected.some((i) => (i.files || []).includes('net-hook.js') && i.world === 'MAIN'),
+    'ページと同じ世界でないと fetch を覗けない'
+  );
+  check(
+    'ページ情報も拾う',
+    (await ask(w6.listeners, { type: 'get-report', tabId: 21 })).text.includes('youtube.com/watch'),
+    '再読み込み直後は onUpdated が来ないため'
+  );
+
+  group('記録が無ければタブ自身に聞く');
+  const store7 = {};
+  const w7 = startWorker(store7, {
+    openTabs: [{ id: 31, url: 'https://ask.example/page', title: '聞いて分かった題' }]
+  });
+  const asked = await ask(w7.listeners, { type: 'get-report', tabId: 31 });
+  check('ページ URL が埋まる', asked.text.includes('https://ask.example/page'), asked.text.slice(0, 200));
+  check('表題も埋まる', asked.text.includes('聞いて分かった題'));
+  check('閉じられたタブでも落ちない', (await ask(w7.listeners, { type: 'get-report', tabId: 999 })).ok === true);
 
   done('extension-state');
 })();

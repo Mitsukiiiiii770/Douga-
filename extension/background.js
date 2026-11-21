@@ -140,11 +140,28 @@ async function persist(tabId) {
     .catch(() => { /* セッションストレージ未対応時は無視 */ });
 }
 
+/** 記録に無ければタブ自身に聞く。再読み込み直後は onUpdated が来ないため */
+async function fillPageInfo(tabId, entry) {
+  if (entry.pageUrl && entry.pageTitle) return entry;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab) {
+      if (!entry.pageUrl && tab.url) entry.pageUrl = tab.url;
+      if (!entry.pageTitle && tab.title) entry.pageTitle = tab.title;
+    }
+  } catch {
+    /* 閉じられていれば分からないままでよい */
+  }
+  return entry;
+}
+
 async function restore(tabId) {
   await ready;
   // 起動時に読み戻しているので、ここでは記憶の中身をそのまま返す。
   // 念のため、取りこぼしがあれば個別にも読み直す
-  if (tabs.has(tabId) && tabs.get(tabId).candidates.size) return tabs.get(tabId);
+  if (tabs.has(tabId) && tabs.get(tabId).candidates.size) {
+    return fillPageInfo(tabId, tabs.get(tabId));
+  }
   const stored = await chrome.storage.session.get(`tab_${tabId}`);
   const saved = stored[`tab_${tabId}`];
   const entry = stateFor(tabId);
@@ -160,7 +177,7 @@ async function restore(tabId) {
     entry.pageTarget = saved.pageTarget || '';
     entry.meta = saved.meta || null;
   }
-  return entry;
+  return fillPageInfo(tabId, entry);
 }
 
 function updateBadge(tabId) {
@@ -357,6 +374,51 @@ chrome.webRequest.onHeadersReceived.addListener(
   { urls: ['<all_urls>'] },
   ['responseHeaders']
 );
+
+/* ---------------- 既に開いているタブへの差し込み ---------------- */
+
+/**
+ * 拡張機能を入れ直したり読み込み直したりすると、既に開いているタブには
+ * content script が入らない。利用者から見ると「再読み込みしたのに
+ * 検出しない」という形で現れ、原因が分かりにくい。
+ *
+ * 起動時に、開いているページへ自分で入れ直す。
+ *
+ * ただしページ側の通信を覗く仕掛け（net-hook）は、差し込んだ時点より
+ * 後の通信しか見られない。既に再生が始まっているページでは、
+ * ページを読み込み直したほうが確実である点は変わらない。
+ */
+async function injectExisting() {
+  if (!chrome.scripting || !chrome.tabs.query) return;
+  let list = [];
+  try {
+    list = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+  } catch {
+    return;
+  }
+  for (const tab of list) {
+    if (!tab.id || tab.id < 0) continue;
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        files: ['site-hints.js', 'page-meta.js', 'content.js']
+      });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        files: ['net-hook.js'],
+        world: 'MAIN'
+      });
+    } catch {
+      /* 権限の無いページ（ストアや設定画面など）は飛ばす */
+    }
+    const entry = stateFor(tab.id);
+    if (tab.url) entry.pageUrl = tab.url;
+    if (tab.title) entry.pageTitle = tab.title;
+  }
+}
+
+if (chrome.runtime.onInstalled) chrome.runtime.onInstalled.addListener(injectExisting);
+if (chrome.runtime.onStartup) chrome.runtime.onStartup.addListener(injectExisting);
 
 /* ---------------- タブのライフサイクル ---------------- */
 

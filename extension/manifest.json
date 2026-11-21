@@ -4,7 +4,13 @@
   "version": "0.1.0",
   "description": "開いているページの動画（HLS / DASH / 直リンク）を検出し、Douga デスクトップアプリに送ってダウンロードします。",
   "minimum_chrome_version": "116",
-  "permissions": ["webRequest", "storage", "tabs", "cookies"],
+  "permissions": [
+    "webRequest",
+    "storage",
+    "tabs",
+    "cookies",
+    "scripting"
+  ],
   "host_permissions": [
     "<all_urls>",
     "http://127.0.0.1/*",
@@ -32,14 +38,24 @@
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["site-hints.js", "page-meta.js", "content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "site-hints.js",
+        "page-meta.js",
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["net-hook.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "net-hook.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
