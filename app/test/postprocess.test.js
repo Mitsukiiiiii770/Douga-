@@ -183,5 +183,45 @@ function valueOf(args, flag) {
     say(['Conversion failed!'])
   );
 
+  group('10 秒お試し');
+  // 高画質化は数時間かかることがある。効くかどうか分からないまま
+  // 待つのは無駄なので、短く試せる必要がある
+  const orig = postprocess.buildSampleOriginalArgs('/in.mkv', '/out.mkv', { start: 30, seconds: 10 });
+  const origLine = orig.join(' ');
+  check('切り出しは -i より前', origLine.indexOf('-ss') < origLine.indexOf('-i'), '後ろだと先頭から復号して遅い');
+  check('長さを指定する', origLine.includes('-t 10'));
+  check('元は作り直さない', origLine.includes('-c copy'), '比べる相手は手元の実物でなければ意味がない');
+  check('カバーアートは通さない', origLine.includes('-map 0:V:0'));
+  check('音声は無くても失敗しない', origLine.includes('-map 0:a?'));
+
+  // baseCfg は postProcess:'none' なので、フィルタの入るプリセットで見る
+  const sampleCfg = { ...baseCfg, postProcess: 'restore' };
+  const trimmed = postprocess
+    .buildFfmpegArgs('/in.mkv', '/out.mkv', sampleCfg, { trim: { start: 30, seconds: 10 } })
+    .join(' ');
+  check('処理側も -i より前で切り出す', trimmed.indexOf('-ss') < trimmed.indexOf('-i'), trimmed);
+  check('処理側はフィルタが入る', trimmed.includes('-vf'), trimmed);
+  check('同じ 10 秒を取る', trimmed.includes('-ss 30') && trimmed.includes('-t 10'));
+  check(
+    '切り出さない場合は -ss を付けない',
+    !postprocess.buildFfmpegArgs('/in.mkv', '/out.mkv', sampleCfg).includes('-ss')
+  );
+
+  group('切り出す位置');
+  check('長い動画は真ん中あたり', postprocess.sampleStart(600) === 300);
+  check('短い動画は先頭から', postprocess.sampleStart(15) === 0, '真ん中だと 10 秒取れない');
+  check('長さが分からなければ先頭', postprocess.sampleStart(undefined) === 0);
+  check('0 でも落ちない', postprocess.sampleStart(0) === 0);
+
+  group('お試しのファイル名');
+  const made = postprocess.samplePathFor('/dir/動画 [abc].mkv', '元');
+  check('元ファイルを上書きしない', made !== '/dir/動画 [abc].mkv');
+  check('拡張子は引き継ぐ', made.endsWith('.mkv'), made);
+  check('どちらか分かる名前', made.includes('お試し-元'), made);
+  check(
+    '処理後と名前が衝突しない',
+    postprocess.samplePathFor('/dir/a.mkv', '元') !== postprocess.samplePathFor('/dir/a.mkv', '処理後')
+  );
+
   done('postprocess');
 })();

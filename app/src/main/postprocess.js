@@ -96,8 +96,11 @@ function buildFilterChain(presetId, custom) {
 /**
  * ffmpeg の引数を組み立てる。実行と分離してあるので単体で検証できる。
  */
-function buildFfmpegArgs(input, output, cfg) {
-  const args = ['-y', '-hide_banner', '-nostats', '-i', input];
+function buildFfmpegArgs(input, output, cfg, { trim = null } = {}) {
+  const args = ['-y', '-hide_banner', '-nostats'];
+  // 切り出しは -i より前に置く。後ろに置くと先頭から復号してから捨てるため遅い
+  if (trim) args.push('-ss', String(trim.start), '-t', String(trim.seconds));
+  args.push('-i', input);
 
   const chain = buildFilterChain(cfg.postProcess, cfg.postProcessCustom);
   if (chain) args.push('-vf', chain);
@@ -133,6 +136,82 @@ function buildFfmpegArgs(input, output, cfg) {
   args.push('-progress', 'pipe:1');
   args.push(output);
   return args;
+}
+
+/* ---------------- お試し比較 ---------------- */
+
+/** 切り出す長さ（秒） */
+const SAMPLE_SECONDS = 10;
+
+/**
+ * 元のまま切り出す引数。再エンコードはしない。
+ *
+ * 「処理後のほうが良いか」を判断したいので、比べる相手は
+ * 手元にある実物そのものでなければ意味がない。
+ */
+function buildSampleOriginalArgs(input, output, { start, seconds = SAMPLE_SECONDS }) {
+  return [
+    '-y', '-hide_banner', '-nostats',
+    '-ss', String(start),
+    '-t', String(seconds),
+    '-i', input,
+    '-map', '0:V:0',
+    '-map', '0:a?',
+    '-c', 'copy',
+    output
+  ];
+}
+
+/** 切り出す位置。頭は黒画面やロゴのことが多いので真ん中あたりを取る */
+function sampleStart(duration) {
+  const total = Number(duration);
+  if (!Number.isFinite(total) || total <= SAMPLE_SECONDS * 2) return 0;
+  return Math.floor(total / 2);
+}
+
+/** お試し用のファイル名 */
+function samplePathFor(input, which) {
+  const dir = path.dirname(input);
+  const ext = path.extname(input);
+  const base = path.basename(input, ext);
+  return path.join(dir, `${base} [お試し-${which}]${ext}`);
+}
+
+/**
+ * 10 秒だけ処理して、元と処理後の 2 本を書き出す。
+ *
+ * 高画質化は動画の長さによっては数時間かかる。効果があるか分からないまま
+ * それを待つのは無駄なので、先に短く試せるようにする。
+ *
+ * 並べて 1 本にはしない。倍率の違うプリセットだと大きさが揃わず、
+ * 縮めて並べると肝心の解像感が分からなくなるため。
+ */
+async function sample(filePath, { duration, onProgress, signal } = {}) {
+  const cfg = settings.get();
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new PostProcessError('お試しの対象ファイルが見つかりません。');
+  }
+  if (!cfg.postProcess || cfg.postProcess === 'none') {
+    throw new PostProcessError('高画質化の種類が「なし」になっています。設定で選んでください。');
+  }
+
+  const start = sampleStart(duration);
+  const trim = { start, seconds: SAMPLE_SECONDS };
+
+  const original = samplePathFor(filePath, '元');
+  const processed = samplePathFor(filePath, '処理後');
+
+  onProgress && onProgress({ stage: 'original' });
+  await runFfmpeg(buildSampleOriginalArgs(filePath, original, trim), { signal });
+
+  onProgress && onProgress({ stage: 'processed' });
+  await runFfmpeg(buildFfmpegArgs(filePath, processed, cfg, { trim }), {
+    onProgress,
+    duration: SAMPLE_SECONDS,
+    signal
+  });
+
+  return { original, processed, start, seconds: SAMPLE_SECONDS };
 }
 
 /** 添付ストリーム（フォント等）を持てる入れ物か */
@@ -419,6 +498,11 @@ module.exports = {
   friendlyError,
   meaningfulError,
   supportsAttachments,
+  sample,
+  buildSampleOriginalArgs,
+  sampleStart,
+  samplePathFor,
+  SAMPLE_SECONDS,
   outputPathFor,
   parseProgress,
   process,

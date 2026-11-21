@@ -348,6 +348,31 @@ api.bridge.onCapture((capture) => {
 
 /* ---------------- キュー ---------------- */
 
+/**
+ * 10 秒だけ高画質化して、元と処理後を書き出す。
+ * 効果が分かりにくいので、全体を待つ前に見比べられるようにする。
+ */
+async function runSample(job, button) {
+  const source = job.sourcePath || job.filePath;
+  button.disabled = true;
+  button.textContent = '作成中…';
+  try {
+    const result = await api.postprocess.sample({ filePath: source, duration: job.duration });
+    if (!result.ok) {
+      button.textContent = '10秒お試し';
+      alert(result.error);
+      return;
+    }
+    // 2 本できているので、フォルダを開いて見比べてもらう
+    await api.shell.showItem(result.processed);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = '10秒お試し';
+  }
+}
+
 function renderJob(job) {
   let li = document.getElementById(`job-${job.id}`);
   if (!li) {
@@ -423,6 +448,8 @@ function renderJob(job) {
     if (job.sourcePath) {
       addButton('元ファイル', () => api.shell.openPath(job.sourcePath));
     }
+    // 高画質化は数時間かかることがある。効くかどうかを先に短く試せるように
+    addButton('10秒お試し', (event) => runSample(job, event.currentTarget));
   }
   if (!ACTIVE_STATUSES.includes(job.status)) {
     addButton('削除', () => api.jobs.remove(job.id));

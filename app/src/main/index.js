@@ -482,6 +482,24 @@ ipcMain.handle('binaries:status', (_event, options = {}) => binaries.status(opti
 
 ipcMain.handle('postprocess:presets', () => postprocess.presetList());
 
+/**
+ * 10 秒だけ処理して、元と処理後を書き出す。
+ *
+ * 高画質化は動画の長さによっては数時間かかる。効果があるか
+ * 分からないまま待つのは無駄なので、先に短く試せるようにする。
+ */
+ipcMain.handle('postprocess:sample', async (_event, { filePath, duration } = {}) => {
+  try {
+    const result = await postprocess.sample(filePath, {
+      duration,
+      onProgress: (p) => send('postprocess:sampleProgress', p)
+    });
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('binaries:install', async (_event, which) => {
   const onProgress = (p) => send('binaries:progress', p);
   // 未知の値で黙って yt-dlp を入れてしまわないよう、明示的に振り分ける
