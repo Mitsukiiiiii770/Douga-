@@ -232,14 +232,16 @@ function write(root, relPath, content) {
     { checkedAt: Date.now() - update.AUTO_INTERVAL_MS - 1000, rateLimitedUntil: 0 },
     oldRoot
   );
-  let reached = false;
+  // 通信に出たかどうかだけを見る。実際に届くかは環境次第なので、
+  // 成否ではなく「省略されなかったこと」で判定する
+  let wentOut = false;
   try {
-    await update.check({ root: oldRoot, auto: true });
+    const result = await update.check({ root: oldRoot, auto: true });
+    wentOut = !result.skipped;
   } catch {
-    // 通信に出たということ。この環境では失敗して当然
-    reached = true;
+    wentOut = true;
   }
-  check('間隔が空いていれば確認しに行く', reached, '6 時間経てば自動確認が動く');
+  check('間隔が空いていれば確認しに行く', wentOut, '時間が経てば自動確認が動く');
 
   check(
     '制限中でも手動なら試す',

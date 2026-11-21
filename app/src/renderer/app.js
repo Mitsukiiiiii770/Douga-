@@ -762,11 +762,15 @@ function browseView() {
  * partition は DOM に入れる前に指定する必要がある。入れた後では
  * 読み込みが始まっていて無視され、監視もログイン保存も効かなくなる。
  */
-function makeWebview(partition) {
+function makeWebview(partition, url) {
   const view = document.createElement('webview');
   view.setAttribute('partition', partition);
   view.setAttribute('allowpopups', '');
-  view.setAttribute('src', 'about:blank');
+  // 最初の移動先は src で渡す。
+  // DOM に入れた直後の webview はまだ読み込みの準備ができておらず、
+  // loadURL() を呼んでも黙って無視される（白紙のままになる）。
+  // src は属性なので、準備ができ次第そこへ移動してくれる。
+  view.setAttribute('src', url || 'about:blank');
   return view;
 }
 
@@ -776,8 +780,14 @@ function createTab({ url = null, view = null } = {}) {
 
   const first = $('browse-view');
   const partition = first ? first.getAttribute('partition') : 'persist:douga-browse';
-  const element = view || makeWebview(partition);
+  // 白紙から始めると何をすればよいか分かりにくいので、最初のページを決めておく
+  const target = url === null ? browseState.homePage : url;
+
+  const element = view || makeWebview(partition, target);
   if (!view) browseHost().appendChild(element);
+  // HTML に書かれている 1 枚目は既に貼り付いている。
+  // 属性への代入なら、準備ができていてもいなくても移動できる
+  else if (target) element.src = target;
 
   const tab = {
     view: element,
@@ -788,11 +798,9 @@ function createTab({ url = null, view = null } = {}) {
     loginBlock: null
   };
   browseTabs.push(tab);
+  tab.url = target || '';
   wireTab(tab);
   activateTab(tab);
-  // 白紙から始めると何をすればよいか分かりにくいので、最初のページを開く
-  const target = url === null ? browseState.homePage : url;
-  if (target) navigateBrowse(target);
   return tab;
 }
 
@@ -980,7 +988,12 @@ function navigateBrowse(input) {
     : /^[\w-]+(\.[\w-]+)+/.test(raw)
       ? `https://${raw}`
       : `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`;
-  view.loadURL(target);
+  try {
+    view.loadURL(target);
+  } catch {
+    // 読み込みの準備ができる前に押された場合。属性なら受け付けてくれる
+    view.src = target;
+  }
 }
 
 /* ---------------- ブックマークと履歴 ---------------- */

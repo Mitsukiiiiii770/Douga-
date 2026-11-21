@@ -72,8 +72,39 @@ const appJs = fs.readFileSync(path.join(RENDERER, 'app.js'), 'utf8');
   check('新しいタブでも開く', /const target = url === null \? browseState\.homePage/.test(appJs));
   check(
     '空にすれば白紙のまま',
-    /if \(target\) navigateBrowse\(target\)/.test(appJs),
+    /url \|\| 'about:blank'/.test(appJs),
     '最初のページを出したくない人もいる'
+  );
+
+  group('新しいタブが白紙にならない');
+  // DOM に入れた直後の webview はまだ読み込みの準備ができておらず、
+  // loadURL() を呼んでも黙って無視される。実際、新しいタブも
+  // 中クリックで開いたタブも白紙のままになっていた
+  check(
+    '最初の移動先は src で渡す',
+    /function makeWebview\(partition, url\)/.test(appJs),
+    'loadURL では間に合わない'
+  );
+  check(
+    '作ってすぐ loadURL を呼ばない',
+    !/appendChild\(element\);\s*\n\s*(const tab|navigateBrowse)/.test(appJs) ||
+      /makeWebview\(partition, target\)/.test(appJs),
+    appJs.includes('makeWebview(partition, target)')
+  );
+  check(
+    '既にある 1 枚目は属性への代入で移動する',
+    /else if \(target\) element\.src = target/.test(appJs),
+    '貼り付け済みの webview は src への代入で移動できる'
+  );
+  check(
+    'アドレス欄からの移動にも逃げ道がある',
+    /catch \{[\s\S]{0,120}view\.src = target/.test(appJs),
+    '準備前に押されても白紙にしないため'
+  );
+  check(
+    'リンクから開くタブも同じ経路',
+    /onOpenTab\(\(url\) => \{[\s\S]{0,200}createTab\(\{ url \}\)/.test(appJs),
+    '中クリックで開いたタブも白紙になっていた'
   );
   check('ホームへ戻るボタンがある', /browse-home'\)\.addEventListener/.test(appJs));
   check(
