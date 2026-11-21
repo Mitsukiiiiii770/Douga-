@@ -50,7 +50,55 @@ function stateFor(tabId) {
   return entry;
 }
 
-function persist(tabId) {
+/**
+ * 保存済みの状態を記憶へ混ぜる。
+ *
+ * 上書きではなく追加にする。service worker が起きてから復元が終わる
+ * までの間に拾った分を捨てないため。
+ */
+function hydrate(tabId, saved) {
+  if (!saved) return;
+  const entry = stateFor(tabId);
+  for (const item of saved.candidates || []) {
+    if (!entry.candidates.has(item.url)) entry.candidates.set(item.url, item);
+  }
+  for (const item of saved.rejected || []) {
+    if (!entry.rejected.has(item.url)) entry.rejected.set(item.url, item);
+  }
+  entry.segments = Math.max(entry.segments || 0, saved.segments || 0);
+  entry.uninteresting = Math.max(entry.uninteresting || 0, saved.uninteresting || 0);
+  entry.headers = { ...(saved.headers || {}), ...(entry.headers || {}) };
+  entry.pageUrl = entry.pageUrl || saved.pageUrl || '';
+  entry.pageTitle = entry.pageTitle || saved.pageTitle || '';
+  entry.usesMediaSource = entry.usesMediaSource || !!saved.usesMediaSource;
+  entry.pageTarget = entry.pageTarget || saved.pageTarget || '';
+  entry.meta = entry.meta || saved.meta || null;
+}
+
+/**
+ * service worker は数十秒で止められ、通信のたびに起こし直される。
+ *
+ * 起きた直後の記憶は空なので、そこへ書き込んで保存すると、
+ * それまでに溜めた候補を空で上書きしてしまう。実際、YouTube で
+ * 候補が 0 件になっていた原因がこれだった。
+ *
+ * 起動したらまず全タブ分を読み戻し、保存はそれが終わるまで待たせる。
+ */
+const ready = (async () => {
+  try {
+    const all = await chrome.storage.session.get(null);
+    for (const [key, saved] of Object.entries(all || {})) {
+      const match = /^tab_(\d+)$/.exec(key);
+      if (match) hydrate(Number(match[1]), saved);
+    }
+  } catch {
+    /* 読めなくても、その回の検出は記憶の上で動く */
+  }
+})();
+
+async function persist(tabId) {
+  // 復元前に書くと、溜めたものを空で上書きしてしまう
+  await ready;
   const entry = tabs.get(tabId);
   if (!entry) return;
   chrome.storage.session
@@ -72,7 +120,10 @@ function persist(tabId) {
 }
 
 async function restore(tabId) {
-  if (tabs.has(tabId)) return tabs.get(tabId);
+  await ready;
+  // 起動時に読み戻しているので、ここでは記憶の中身をそのまま返す。
+  // 念のため、取りこぼしがあれば個別にも読み直す
+  if (tabs.has(tabId) && tabs.get(tabId).candidates.size) return tabs.get(tabId);
   const stored = await chrome.storage.session.get(`tab_${tabId}`);
   const saved = stored[`tab_${tabId}`];
   const entry = stateFor(tabId);
