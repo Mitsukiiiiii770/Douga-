@@ -64,5 +64,44 @@ const LAUNCHER = path.join(ROOT, 'Douga起動.bat');
   );
   check('印は使い終わったら消す', text.includes('del ".deps-stale"'));
 
+  group('どちらを指しても起動できる');
+  // ショートカットが app を指すか、その親を指すかは作られ方で変わる。
+  // 実際「Unable to find Electron app at ...\\Neo」で起動できなくなった
+  const rootPkgPath = path.join(ROOT, 'package.json');
+  check('フォルダの直下に package.json がある', fs.existsSync(rootPkgPath));
+
+  const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
+  const appPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'app', 'package.json'), 'utf8'));
+  check('入口を指している', !!rootPkg.main, rootPkg.main);
+  check('その先が実在する', fs.existsSync(path.join(ROOT, rootPkg.main)), rootPkg.main);
+  check('app 側の入口と同じ場所', rootPkg.main.endsWith(appPkg.main.replace(/^\.\//, '')));
+  check('版が食い違っていない', rootPkg.version === appPkg.version, `${rootPkg.version} / ${appPkg.version}`);
+  check('公開しない印が付いている', rootPkg.private === true, '取り違えて公開されないように');
+  check(
+    '依存を持たない',
+    !rootPkg.dependencies && !rootPkg.devDependencies,
+    'ここで npm install させないため'
+  );
+
+  group('起動のされ方に依存しない');
+  const mainSrc = fs.readFileSync(path.join(ROOT, 'app', 'src', 'main', 'index.js'), 'utf8');
+  const binSrc = fs.readFileSync(path.join(ROOT, 'app', 'src', 'main', 'binaries.js'), 'utf8');
+
+  check(
+    'ダウンロード済みの実行ファイルの置き場を見失わない',
+    !/getAppPath\(\), 'bin'/.test(binSrc) && /__dirname/.test(binSrc),
+    'app の親から起動されると app/bin を見失う'
+  );
+  check(
+    'アイコンの場所も自分の居場所から数える',
+    /const appDir = path\.resolve\(__dirname/.test(mainSrc),
+    mainSrc.match(/const appDir =.*/)?.[0]
+  );
+  check(
+    'ショートカットの引数を囲んでいる',
+    /`"\$\{appDir\}"`/.test(mainSrc),
+    '空白を含む場所に置かれても 1 つの引数として渡るように'
+  );
+
   done('launcher');
 })();

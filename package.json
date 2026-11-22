@@ -1,0 +1,8 @@
+{
+  "name": "douga",
+  "private": true,
+  "version": "0.1.0",
+  "description": "動画抽出・ダウンローダー（このファイルは、フォルダをそのまま指して起動できるようにするためのものです）",
+  "main": "app/src/main/index.js",
+  "license": "MIT"
+}

@@ -30,12 +30,17 @@ const FFMPEG_ZIP_URL =
 const ARIA2_ZIP_URL =
   'https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip';
 
-/** 同梱 bin ディレクトリ（開発時は app/bin、配布時は resources/bin） */
+/**
+ * 同梱 bin ディレクトリ（開発時は app/bin、配布時は resources/bin）。
+ *
+ * app.getAppPath() は使わない。フォルダをそのまま指して起動されると
+ * app の親を返すため、ダウンロード済みの yt-dlp / ffmpeg を見失う。
+ * 自分の居場所から数えれば、どう起動されても同じ場所を指す。
+ */
 function binDir() {
-  const packed = app.isPackaged
+  return app.isPackaged
     ? path.join(process.resourcesPath, 'bin')
-    : path.join(app.getAppPath(), 'bin');
-  return packed;
+    : path.resolve(__dirname, '..', '..', 'bin');
 }
 
 /** ユーザーがダウンロードしたバイナリの置き場（書き込み可能） */

@@ -370,7 +370,7 @@ function applyLoginItem(enabled) {
     app.setLoginItemSettings({
       openAtLogin: !!enabled,
       path: process.execPath,
-      args: app.isPackaged ? [] : [app.getAppPath()]
+      args: app.isPackaged ? [] : [path.resolve(__dirname, '..', '..')]
     });
     return true;
   } catch {
@@ -408,7 +408,9 @@ ipcMain.handle('shell:createShortcut', async () => {
     return { ok: false, error: 'この機能は Windows 専用です' };
   }
   try {
-    const appDir = app.getAppPath();
+    // 起動のされ方で app.getAppPath() が app か、その親かに変わる。
+    // アイコンは自分の居場所から数えたほうが確実
+    const appDir = path.resolve(__dirname, '..', '..');
     const iconPath = path.join(appDir, 'build', 'icon.ico');
     const target = path.join(app.getPath('desktop'), 'Douga.lnk');
 
@@ -416,6 +418,7 @@ ipcMain.handle('shell:createShortcut', async () => {
       // 開発用に npm start で動かしている場合、execPath は electron 本体を指す。
       // その場合だけアプリの場所を引数で渡す必要がある
       target: process.execPath,
+      // 空白を含む場所に置かれていても 1 つの引数として渡るよう囲む
       args: app.isPackaged ? '' : `"${appDir}"`,
       cwd: appDir,
       icon: fs.existsSync(iconPath) ? iconPath : process.execPath,
