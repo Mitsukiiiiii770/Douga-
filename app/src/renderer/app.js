@@ -575,6 +575,7 @@ async function loadSettings() {
   $('post-encoder').value = s.postEncoder;
   $('post-crf').value = s.postCrf;
   $('post-custom').value = s.postProcessCustom || '';
+  $('keep-original').checked = s.keepOriginalAfterEnhance !== false;
   renderPostNote();
   $('bridge-port').value = s.bridgePort;
   $('bridge-enabled').checked = s.bridgeEnabled;
@@ -688,11 +689,22 @@ function renderPostNote() {
     note.textContent = 'カスタムフィルタが指定されているため、プリセットは無視されます。';
     return;
   }
+  // 容量の話は見落とされやすいので、ここで明示する
+  const keep = $('keep-original').checked;
+  const space = keep
+    ? '元ファイルも残すので、保存先の使用量はおよそ倍になります。'
+    : '元ファイルは成功後に消すので、残るのは 1 本だけです。やり直すには取り直しが要ります。';
+
   note.textContent =
     preset === 'none'
       ? '後処理は行いません。ダウンロードしたファイルがそのまま残ります。'
-      : '元ファイルは残したまま、別名で書き出します。動画の長さによっては数十分かかります。';
+      : `別名で書き出します。動画の長さによっては数十分かかります。${space}`;
 }
+
+$('keep-original').addEventListener('change', async (event) => {
+  await api.settings.set({ keepOriginalAfterEnhance: event.target.checked });
+  renderPostNote();
+});
 
 $('post-process').addEventListener('change', renderPostNote);
 $('post-custom').addEventListener('input', renderPostNote);

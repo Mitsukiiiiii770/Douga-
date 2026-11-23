@@ -25,6 +25,9 @@ const DEFAULTS = {
   postProcess: 'none',
   postProcessCustom: '',
   postEncoder: 'x264',
+  // 高画質化が成功した後、元のファイルを残すか。
+  // 残すと容量は倍近くになるが、結果が気に入らなかったときに戻せる
+  keepOriginalAfterEnhance: true,
   postCrf: 18,
   postFrameRate: 30,
   realesrganPath: '',

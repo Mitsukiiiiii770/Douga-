@@ -268,7 +268,20 @@ class Queue extends EventEmitter {
             }
           });
           if (enhanced) {
-            job.sourcePath = job.filePath;
+            // 高画質化は再エンコードなので、結果が元より眠くなることがある。
+            // 既定では元を残して戻せるようにするが、2 倍に拡大すると
+            // 容量が倍以上になるため、消す選択もできる
+            if (settings.get().keepOriginalAfterEnhance === false) {
+              try {
+                fs.unlinkSync(job.filePath);
+                job.sourcePath = null;
+              } catch {
+                // 消せなければ残るだけ。害は無いので、残した扱いにする
+                job.sourcePath = job.filePath;
+              }
+            } else {
+              job.sourcePath = job.filePath;
+            }
             job.filePath = enhanced;
           }
         } catch (err) {

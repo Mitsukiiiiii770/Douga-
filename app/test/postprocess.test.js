@@ -5,6 +5,7 @@
  * 実際の ffmpeg は起動しない。
  */
 
+const fs = require('fs');
 const path = require('path');
 const { group, check, done } = require('./helper');
 
@@ -222,6 +223,36 @@ function valueOf(args, flag) {
     '処理後と名前が衝突しない',
     postprocess.samplePathFor('/dir/a.mkv', '元') !== postprocess.samplePathFor('/dir/a.mkv', '処理後')
   );
+
+  group('元ファイルを残すかどうか');
+  // 2 倍に拡大すると容量が倍以上になる。10 秒お試しで事前に判断できる
+  // ようになったので、残さない選択もできるようにした
+  const settingsMod = require('../src/main/settings');
+  const queueSrc = fs.readFileSync(
+    path.resolve(__dirname, '..', 'src', 'main', 'queue.js'),
+    'utf8'
+  );
+  check(
+    '既定では残す',
+    settingsMod.DEFAULTS.keepOriginalAfterEnhance === true,
+    '消すのは取り返しがつかないため'
+  );
+  check(
+    '設定で消せる',
+    /keepOriginalAfterEnhance === false/.test(queueSrc),
+    queueSrc.match(/keepOriginalAfterEnhance.*/)?.[0]
+  );
+  check(
+    '成功したときだけ消す',
+    /if \(enhanced\) \{[\s\S]{0,400}unlinkSync/.test(queueSrc),
+    '失敗したら元が唯一の成果物になる'
+  );
+  check(
+    '消せなかったら残した扱いにする',
+    /catch \{[\s\S]{0,160}job\.sourcePath = job\.filePath/.test(queueSrc),
+    '消えていないのに「消した」ことにすると元ファイルに辿れなくなる'
+  );
+  check('消したら元ファイルの控えを持たない', /job\.sourcePath = null/.test(queueSrc));
 
   done('postprocess');
 })();
