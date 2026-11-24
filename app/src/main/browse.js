@@ -2,6 +2,8 @@
 
 const { EventEmitter } = require('events');
 const { session } = require('electron');
+const fs = require('fs');
+const path = require('path');
 const detect = require('../shared/detect');
 const adblock = require('../shared/adblock');
 const settings = require('./settings');
@@ -20,6 +22,23 @@ const diagnostics = require('./diagnostics');
  */
 
 const PARTITION = 'persist:douga-browse';
+
+/**
+ * 同じ名前があれば番号を足す。
+ * ブラウザから落としたファイルで既存を黙って潰さないため。
+ */
+function freeName(dir, name) {
+  const ext = path.extname(name);
+  const base = path.basename(name, ext) || 'download';
+  let candidate = path.join(dir, base + ext);
+  let n = 1;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(dir, `${base} (${n})${ext}`);
+    n++;
+    if (n > 999) break;
+  }
+  return candidate;
+}
 
 /** 1 ページあたりに覚えておく候補の上限 */
 const MAX_CANDIDATES = 60;
@@ -108,6 +127,48 @@ class Browser extends EventEmitter {
         /* 判定に失敗したら通す。止めすぎるより通しすぎるほうが安全 */
       }
       callback({});
+    });
+
+    // ブラウザの中でファイルのリンクを押したとき。
+    //
+    // 既定では何も起きない（Electron は保存先を決めないと落とさない）。
+    // ブラウザとして使う以上、押して無反応なのは欠陥に近い。
+    // 保存先はアプリの設定と同じ場所にして、進み具合を画面へ流す。
+    ses.on('will-download', (event, item) => {
+      let dir = '';
+      try {
+        dir = settings.get().downloadDir;
+      } catch {
+        /* 設定が読めなければ Electron の既定に任せる */
+      }
+      if (!dir) return;
+
+      let target = '';
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        target = freeName(dir, item.getFilename() || 'download');
+        item.setSavePath(target);
+      } catch {
+        return; // 決められなければ Electron の既定（保存先を尋ねる）に任せる
+      }
+
+      const name = path.basename(target);
+      const total = item.getTotalBytes();
+      this.emit('download', { state: 'started', name, path: target, total });
+
+      item.on('updated', (_e, state) => {
+        this.emit('download', {
+          state: state === 'interrupted' ? 'interrupted' : 'progress',
+          name,
+          path: target,
+          received: item.getReceivedBytes(),
+          total
+        });
+      });
+
+      item.once('done', (_e, state) => {
+        this.emit('download', { state, name, path: target, total });
+      });
     });
 
     // 動画配信は Referer を見て弾くサイトが多いので、送られている値を控える
@@ -277,4 +338,5 @@ class Browser extends EventEmitter {
 }
 
 module.exports = new Browser();
+module.exports.freeName = freeName;
 module.exports.PARTITION = PARTITION;

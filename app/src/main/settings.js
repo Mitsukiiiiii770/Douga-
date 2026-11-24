@@ -52,6 +52,9 @@ const DEFAULTS = {
   browseHomePage: 'https://www.google.com',
   // アドレス欄に URL 以外を入れたときの検索先。%s が検索語に置き換わる
   searchUrl: 'https://www.google.com/search?q=%s',
+  // クリップボードに動画の URL が来たら知らせる。
+  // 中身はどこにも残さない（http(s) 以外は見ずに捨てる）
+  watchClipboard: true,
   // アプリ内ブラウザで広告・計測を止める
   blockAds: true,
   // 自分で足す配信元。1 行 1 件

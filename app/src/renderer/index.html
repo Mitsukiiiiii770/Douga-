@@ -44,6 +44,12 @@
           <button id="probe-cancel" class="ghost" hidden>中止</button>
         </div>
 
+        <div class="notice clip-bar" id="clip-bar" hidden>
+          <span class="clip-text" id="clip-url"></span>
+          <button id="clip-use" class="small primary">解析する</button>
+          <button id="clip-ignore" class="small ghost">閉じる</button>
+        </div>
+
         <div class="hint" id="probe-hint">
           拡張機能からページを送ると、ここに自動で読み込まれます。
         </div>
@@ -149,6 +155,7 @@
           <button id="browse-hist" class="ghost small" title="履歴 (Ctrl+H)">履歴</button>
           <button id="browse-capture" class="primary">この動画を取り込む</button>
         </div>
+        <p class="notice" id="browse-download" hidden></p>
         <p class="hint" id="browse-status">
           ここで動画を再生すると、配信 URL を自動で見つけます。ログインが必要なサイトは、この中でログインしてください。
         </p>
@@ -205,6 +212,10 @@
           <div class="row">
             <button id="app-restart" class="ghost">アプリを再起動</button>
           </div>
+          <label class="check">
+            <input type="checkbox" id="watch-clipboard" />
+            <span>コピーした動画の URL を知らせる（中身は保存しません）</span>
+          </label>
           <label class="check">
             <input type="checkbox" id="open-at-login" />
             <span>PC の起動時に Douga を開く</span>

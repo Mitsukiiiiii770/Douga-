@@ -28,6 +28,7 @@ const suites = [
   'search.test.js',
   'adblock.test.js',
   'preload.test.js',
+  'clipboard.test.js',
   'extension.test.js',
   'extension-state.test.js',
   'bridge.test.js',

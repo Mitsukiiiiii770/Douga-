@@ -13,6 +13,7 @@ const cookies = require('./cookies');
 const postprocess = require('./postprocess');
 const browse = require('./browse');
 const browseStore = require('./browse-store');
+const clipboardWatch = require('./clipboard-watch');
 const shortcuts = require('../shared/shortcuts');
 const adblock = require('../shared/adblock');
 const diagnostics = require('./diagnostics');
@@ -133,6 +134,11 @@ bridge.on('capture', (capture) => {
   focusWindow();
   send('capture:incoming', capture);
 });
+
+// アプリ内ブラウザからの知らせ。
+// これまで転送しておらず、画面側は定期取得で代用していた
+browse.on('update', (state) => send('browse:update', state));
+browse.on('download', (info) => send('browse:download', info));
 
 bridge.on('status', (status) => send('bridge:status', status));
 bridge.on('paired', (client) => send('bridge:paired', client));
@@ -381,6 +387,28 @@ function applyLoginItem(enabled) {
 ipcMain.handle('app:openAtLogin', (_event, enabled) => {
   settings.set({ openAtLogin: !!enabled });
   return applyLoginItem(enabled);
+});
+
+/**
+ * クリップボードの監視。
+ *
+ * 知らせるだけで、勝手に解析まで進めない。
+ * 中身は残さないので、設定を切れば何も読まなくなる。
+ */
+function applyClipboardWatch(enabled) {
+  if (enabled === false) return clipboardWatch.stop();
+  if (!clipboardWatch.enabled) {
+    clipboardWatch.removeAllListeners('url');
+    clipboardWatch.on('url', (url) => send('clipboard:url', url));
+    clipboardWatch.start();
+  }
+  return true;
+}
+
+ipcMain.handle('app:watchClipboard', (_event, enabled) => {
+  settings.set({ watchClipboard: !!enabled });
+  applyClipboardWatch(!!enabled);
+  return true;
 });
 
 ipcMain.handle('app:restart', () => {
@@ -638,6 +666,7 @@ app.whenReady().then(async () => {
       /* 連携が始まらなくても、アプリ単体では使える */
     }
     applyLoginItem(settings.get().openAtLogin);
+    applyClipboardWatch(settings.get().watchClipboard);
   });
 
   app.on('activate', () => {
@@ -650,6 +679,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  clipboardWatch.stop();
   bridge.stop();
   // 遅延書き込みが残っていると履歴が失われる
   browseStore.saveNow();

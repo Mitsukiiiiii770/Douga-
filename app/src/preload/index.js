@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld('douga', {
     cookies: (urls) => ipcRenderer.invoke('browse:cookies', urls),
     clearData: () => ipcRenderer.invoke('browse:clearData'),
     onUpdate: listen('browse:update'),
+    onDownload: listen('browse:download'),
     // 埋め込みブラウザからのログインを拒否するサイトか
     loginBlock: (url) => loginBlocks.loginBlock(url),
     // アドレス欄の入力を移動先に変える。URL か検索語かはここで判断する
@@ -66,6 +67,8 @@ contextBridge.exposeInMainWorld('douga', {
   },
   app: {
     restart: () => ipcRenderer.invoke('app:restart'),
+    watchClipboard: (enabled) => ipcRenderer.invoke('app:watchClipboard', enabled),
+    onClipboardUrl: listen('clipboard:url'),
     openAtLogin: (enabled) => ipcRenderer.invoke('app:openAtLogin', enabled)
   },
   diagnostics: {

@@ -585,6 +585,7 @@ async function loadSettings() {
   $('github-token').value = s.githubToken || '';
   $('keep-versions').value = s.keepVersions === undefined ? 3 : s.keepVersions;
   $('open-at-login').checked = !!s.openAtLogin;
+  $('watch-clipboard').checked = s.watchClipboard !== false;
   $('max-tabs').value = s.maxBrowseTabs || 5;
   $('browse-home-page').value = s.browseHomePage === undefined ? '' : s.browseHomePage;
   $('search-url').value = s.searchUrl || '';
@@ -1096,6 +1097,40 @@ function navigateBrowse(input) {
     view.src = target;
   }
 }
+
+/**
+ * ブラウザの中でファイルのリンクを押したときの進み具合。
+ * 押して無反応だと壊れているようにしか見えないので、必ず何か出す。
+ */
+api.browse.onDownload((info) => {
+  if (!info) return;
+  const node = $('browse-download');
+  node.hidden = false;
+  node.classList.remove('error');
+
+  if (info.state === 'completed') {
+    node.textContent = `保存しました: ${info.name}`;
+    // 片付けないと次の保存と混ざって見える
+    setTimeout(() => {
+      if (node.textContent.includes(info.name)) node.hidden = true;
+    }, 8000);
+    return;
+  }
+  if (info.state === 'cancelled' || info.state === 'interrupted') {
+    node.classList.add('error');
+    node.textContent = `保存できませんでした: ${info.name}`;
+    return;
+  }
+  if (info.state === 'started') {
+    node.textContent = `保存中: ${info.name}`;
+    return;
+  }
+  const percent = info.total ? Math.floor((info.received / info.total) * 100) : null;
+  node.textContent =
+    percent === null
+      ? `保存中: ${info.name}`
+      : `保存中: ${info.name} — ${percent}%`;
+});
 
 /* ---------------- ブックマークと履歴 ---------------- */
 
@@ -1663,6 +1698,36 @@ function announceUpdate() {
 $('app-restart').addEventListener('click', () => api.app.restart());
 
 $('open-root').addEventListener('click', () => api.update.openFolder());
+
+/* ---------------- コピーした URL の受け取り ---------------- */
+
+/**
+ * コピーされた URL を知らせるだけにする。勝手に解析まで進めない。
+ * 動画と関係ない URL を複写することもあるため。
+ */
+api.app.onClipboardUrl((url) => {
+  if (!url) return;
+  state.clipboardUrl = url;
+  $('clip-url').textContent = `コピーした URL: ${url}`;
+  $('clip-bar').hidden = false;
+});
+
+$('clip-use').addEventListener('click', () => {
+  const url = state.clipboardUrl;
+  $('clip-bar').hidden = true;
+  if (!url) return;
+  showTab('download');
+  probe(url);
+});
+
+$('clip-ignore').addEventListener('click', () => {
+  $('clip-bar').hidden = true;
+});
+
+$('watch-clipboard').addEventListener('change', async (event) => {
+  await api.app.watchClipboard(event.target.checked);
+  if (!event.target.checked) $('clip-bar').hidden = true;
+});
 
 $('open-at-login').addEventListener('change', async (event) => {
   const ok = await api.app.openAtLogin(event.target.checked);
