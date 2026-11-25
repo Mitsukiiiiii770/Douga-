@@ -373,10 +373,19 @@ ipcMain.handle('update:apply', async () => {
 function applyLoginItem(enabled) {
   if (process.platform !== 'win32' && process.platform !== 'darwin') return false;
   try {
+    // 引数は自分で引用符をつける。
+    //
+    // setLoginItemSettings は受け取った args を空白でつないで登録するだけで、
+    // 1 つずつは囲まない。そのため空白を含む場所に置いていると、Windows が
+    // そこで分割してしまい、次のような形で起動に失敗する:
+    //
+    //   「C:\...\総本山\Douga Neo」→ 引数1「...\Douga」＋ 引数2「Neo」
+    //   → Unable to find Electron app at C:\...\総本山\Neo
+    const appDir = path.resolve(__dirname, '..', '..');
     app.setLoginItemSettings({
       openAtLogin: !!enabled,
       path: process.execPath,
-      args: app.isPackaged ? [] : [path.resolve(__dirname, '..', '..')]
+      args: app.isPackaged ? [] : [`"${appDir}"`]
     });
     return true;
   } catch {

@@ -97,10 +97,29 @@ const LAUNCHER = path.join(ROOT, 'Douga起動.bat');
     /const appDir = path\.resolve\(__dirname/.test(mainSrc),
     mainSrc.match(/const appDir =.*/)?.[0]
   );
+  group('空白を含む場所に置かれても起動する');
+  // Windows は囲まれていない引数を空白で分割する。実際これで
+  // 「Unable to find Electron app at ...\\総本山\\Neo」が出ていた
+  const quoted = [...mainSrc.matchAll(/args:[^\n]*/g)].map((m) => m[0]);
+  check('引数を渡している箇所がある', quoted.length >= 2, quoted);
+  check(
+    'どの引数も囲んである',
+    quoted.every((line) => /isPackaged \? (\[\]|'') :/.test(line) === false || /`"\$\{appDir\}"`/.test(line)),
+    quoted
+  );
   check(
     'ショートカットの引数を囲んでいる',
-    /`"\$\{appDir\}"`/.test(mainSrc),
-    '空白を含む場所に置かれても 1 つの引数として渡るように'
+    /args: app\.isPackaged \? '' : `"\$\{appDir\}"`/.test(mainSrc),
+    mainSrc.match(/args: app\.isPackaged \? ''.*/)?.[0]
+  );
+  check(
+    '自動起動の引数も囲んでいる',
+    /args: app\.isPackaged \? \[\] : \[`"\$\{appDir\}"`\]/.test(mainSrc),
+    'setLoginItemSettings は 1 つずつ囲んでくれない'
+  );
+  check(
+    '自動起動も自分の居場所から数える',
+    /function applyLoginItem[\s\S]{0,1200}path\.resolve\(__dirname/.test(mainSrc)
   );
 
   done('launcher');
